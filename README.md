@@ -1,15 +1,17 @@
 qrcode-rust
 ===========
 
-[![Build status](https://github.com/kennytm/qrcode-rust/workflows/Rust/badge.svg)](https://github.com/kennytm/qrcode-rust/actions?query=workflow%3ARust)
+[![Derleme durumu](https://github.com/kennytm/qrcode-rust/workflows/Rust/badge.svg)](https://github.com/kennytm/qrcode-rust/actions?query=workflow%3ARust)
 [![crates.io](https://img.shields.io/crates/v/qrcode.svg)](https://crates.io/crates/qrcode)
 [![MIT OR Apache 2.0](https://img.shields.io/badge/license-MIT%20%2f%20Apache%202.0-blue.svg)](./LICENSE-APACHE.txt)
 
-QR code and Micro QR code encoder in Rust. [Documentation](https://docs.rs/qrcode).
+Rust ile QR kodu ve Micro QR kodu kodlayıcı. [Belgeler](https://docs.rs/qrcode).
 
-No input aborts the process: everything the encoder rejects comes back as a
-[`QrError`](https://docs.rs/qrcode/latest/qrcode/types/enum.QrError.html), in
-release builds as much as in debug ones. See [Panics and errors](#panics-and-errors).
+Geçersiz dış girdi, olağan çalışma hatası veya desteklenmeyen seçenek süreci
+kasıtlı olarak panikletmez; kodlayıcının reddettiği durumlar hata ayıklama ve yayın
+derlemelerinde aynı biçimde
+[`QrError`](https://docs.rs/qrcode/latest/qrcode/types/enum.QrError.html) olarak
+döner. Ayrıntı için [Panikler ve hatalar](#panikler-ve-hatalar) bölümüne bakın.
 
 Cargo.toml
 ----------
@@ -19,39 +21,40 @@ Cargo.toml
 qrcode = "0.15.0"
 ```
 
-The default settings will depend on the `image` crate. If you don't need image generation capability, disable the `default-features`:
+Varsayılan özellikler `image` crate'ine bağlıdır. Görüntü üretmeye ihtiyacınız
+yoksa `default-features` seçeneğini kapatın:
 
 ```toml
 [dependencies]
 qrcode = { version = "0.15.0", default-features = false, features = ["std"] }
 ```
 
-Example
--------
+Örnekler
+--------
 
-## Image generation
+## Görüntü üretme
 
 ```rust
 use qrcode::QrCode;
 use image::Luma;
 
 fn main() {
-    // Encode some data into bits.
+    // Bir miktar veriyi bitlere kodla.
     let code = QrCode::new(b"01234567").unwrap();
 
-    // Render the bits into an image.
+    // Bitleri bir görüntüye çiz.
     let image = code.render::<Luma<u8>>().build();
 
-    // Save the image.
+    // Görüntüyü kaydet.
     image.save("/tmp/qrcode.png").unwrap();
 }
 ```
 
-Generates this image:
+Şu görüntüyü üretir:
 
-![Output](src/test_annex_i_qr_as_image.png)
+![Çıktı](src/test_annex_i_qr_as_image.png)
 
-## String generation
+## Karakter dizisi üretme
 
 ```rust
 use qrcode::QrCode;
@@ -67,7 +70,7 @@ fn main() {
 }
 ```
 
-Generates this output:
+Şu çıktıyı üretir:
 
 ```none
 ##############    ########  ##############
@@ -93,7 +96,7 @@ Generates this output:
 ##############  ####    ##      ##    ##
 ```
 
-## SVG generation
+## SVG üretme
 
 ```rust
 use qrcode::{QrCode, Version, EcLevel};
@@ -110,11 +113,11 @@ fn main() {
 }
 ```
 
-Generates this SVG:
+Şu SVG'yi üretir:
 
-[![Output](src/test_annex_i_micro_qr_as_svg.svg)](src/test_annex_i_micro_qr_as_svg.svg)
+[![Çıktı](src/test_annex_i_micro_qr_as_svg.svg)](src/test_annex_i_micro_qr_as_svg.svg)
 
-## Unicode string generation
+## Unicode karakter dizisi üretme
 
 ```rust
 use qrcode::QrCode;
@@ -130,7 +133,7 @@ fn main() {
 }
 ```
 
-Generates this output:
+Şu çıktıyı üretir:
 
 ```text
 █████████████████████████████
@@ -150,7 +153,7 @@ Generates this output:
 ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 ```
 
-## PIC generation
+## PIC üretme
 
 ```rust
 use qrcode::render::pic;
@@ -166,8 +169,8 @@ fn main() {
 }
 ```
 
-Generates [PIC](https://en.wikipedia.org/wiki/PIC_(markup_language))
-output that renders as follows:
+Aşağıdaki gibi çizilen bir
+[PIC](https://en.wikipedia.org/wiki/PIC_(markup_language)) çıktısı üretir:
 
 ```pic
 maxpswid=29;maxpsht=29;movewid=0;moveht=1;boxwid=1;boxht=1
@@ -181,9 +184,11 @@ p(8,4,1,1)
 p(9,4,1,1)
 …
 ```
-See [`test_annex_i_micro_qr_as_pic.pic`](src/test_annex_i_micro_qr_as_pic.pic) for a full example.
+Tam örnek için
+[`test_annex_i_micro_qr_as_pic.pic`](src/test_annex_i_micro_qr_as_pic.pic)
+dosyasına bakın.
 
-## EPS generation
+## EPS üretme
 
 ```rust
 use qrcode::render::eps;
@@ -201,8 +206,8 @@ fn main() {
 }
 ```
 
-Generates [EPS](https://en.wikipedia.org/wiki/Encapsulated_PostScript)
-output that renders as follows:
+Aşağıdaki gibi çizilen bir
+[EPS](https://en.wikipedia.org/wiki/Encapsulated_PostScript) çıktısı üretir:
 
 ```postscript
 %!PS-Adobe-3.0 EPSF-3.0
@@ -222,28 +227,39 @@ grestore
 84 180 12 12 rectfill
 …
 ```
-See [`test_annex_i_micro_qr_as_eps.eps`](src/test_annex_i_micro_qr_as_eps.eps) for a full example.
+Tam örnek için
+[`test_annex_i_micro_qr_as_eps.eps`](src/test_annex_i_micro_qr_as_eps.eps)
+dosyasına bakın.
 
-Panics and errors
------------------
+Panikler ve hatalar
+-------------------
 
-Every entry point is total with respect to its input: a value the encoder cannot
-represent is returned as a `QrError`, never raised as a panic. This holds in
-release builds — the numeric conversions used to check only under
-`debug_assertions` and wrap silently otherwise, which turned a rejected input
-into a corrupt QR code rather than an error.
+Kamu API'sinin hata sözleşmesi şöyledir:
 
-Three things keep it true:
+> Geçersiz dış girdi, olağan çalışma hatası veya desteklenmeyen seçenek
+> kütüphaneyi kasıtlı olarak panikletmez; yapılandırılmış bir `QrError` döndürür.
+> Panik yalnızca belgelenmiş bir programlama sözleşmesi ihlalinde veya
+> kütüphanenin iç değişmezinin bozulduğunu gösteren bir programlama hatasında
+> kullanılabilir.
 
-* `Cargo.toml` denies `clippy::{indexing_slicing, unwrap_used, expect_used,
-  panic, unreachable}` for the library, so a new panicking construct has to be
-  introduced deliberately with an `#[expect(..., reason = "...")]` explaining why
-  it cannot fire.
-* `tests/no_panic.rs` sweeps every version, error correction level and mask
-  pattern, every byte pair, and coordinates on and past each edge, plus a
-  deterministic randomised round.
-* `fuzz/` holds `cargo fuzz` targets for the encoding and rendering paths, built
-  with `overflow-checks = true`:
+Başka bir deyişle girdi sınırda doğrulanır, özel alanlı geçerli bir tipe
+dönüştürülür ve çekirdek işlemler mümkün olduğunca doğrudan değer döndürür.
+Örneğin `Segment::new` hatalı aralığı reddeder; geçerli bir `Segment`in
+`encoded_len` metodu bundan sonra gereksiz bir `Result` üretmez. Hata ayıklama ve
+yayın profilleri aynı denetimleri yapar; taşma hiçbir profilde bozuk bir QR koduna
+dönüşmez.
+
+Bu sözleşmeyi üç katman korur:
+
+* `Cargo.toml`, kütüphane için `clippy::{indexing_slicing, unwrap_used,
+  expect_used, panic, unreachable}` lintlerini reddeder. Yeni bir panik ihtimali
+  ancak neden dış girdiden erişilemediğini açıklayan
+  `#[expect(..., reason = "...")]` ile bilinçli biçimde eklenebilir.
+* `tests/no_panic.rs`; her sürümü, hata düzeltme seviyesini, maske desenini,
+  bayt çiftlerini, sınır koordinatlarını, hatalı çağrı sıralarını ve
+  deterministik rastgele girdileri tarar.
+* `fuzz/`, kodlama ve çizim yolları için `overflow-checks = true` ile derlenen
+  `cargo fuzz` hedeflerini içerir:
 
   ```sh
   cargo install cargo-fuzz
@@ -251,10 +267,10 @@ Three things keep it true:
   cargo +nightly fuzz run render
   ```
 
-The methods that still panic do so only on a broken caller contract, each has a
-`# Panics` section, and each has a checked twin:
+Paniklemeye devam edebilen metotlar yalnızca açık bir çağıran sözleşmesi
+ihlalinde bunu yapar. Her birinin `# Panics` bölümü ve kontrollü karşılığı vardır:
 
-| Panicking | Checked |
+| Panikleyen | Kontrollü |
 | --- | --- |
 | `code[(x, y)]` | `QrCode::get(x, y) -> Option<Color>` |
 | `QrCode::is_functional` | `QrCode::get_functional -> Option<bool>` |
@@ -264,18 +280,18 @@ The methods that still panic do so only on a broken caller contract, each has a
 | `Renderer::new` | `Renderer::try_new` |
 | `Renderer::build` | `Renderer::try_build` |
 
-Allocation failure remains outside the library's control. `Renderer::try_build`
-refuses anything above `render::MAX_IMAGE_PIXELS` rather than handing a saturated
-length to the allocator, but that is a bound on the pixel *count*, not on memory:
-a request that passes it can still be several gigabytes once multiplied by the
-backend's element size. Deciding how large an image is affordable is the
-caller's, not the library's.
+Bellek tükenmesi, çağrı yığını taşması ve bağımlılık panikleri bu garantinin dışındadır.
+`Renderer::try_build`, doymuş bir uzunluğu ayırıcıya göndermek yerine
+`render::MAX_IMAGE_PIXELS` üzerindeki istekleri reddeder. Bu sınır yalnızca
+*piksel sayısını* kapsar; arka ucun öğe boyutuyla çarpıldığında izin verilen bir
+istek yine birkaç gigabayt tutabilir. Uygun görüntü bütçesini belirlemek
+çağıranın sorumluluğudur.
 
-Upgrading from 0.14
--------------------
+0.14 sürümünden yükseltme
+-------------------------
 
-`Version` is now validated on construction, which is what makes the per-version
-table lookups infallible. The enum variants are gone:
+`Version` artık kurulurken doğrulanır; böylece sürüm tablolarındaki iç aramalar
+hatasız olur. Eski enum varyantları kaldırılmıştır:
 
 ```rust
 // 0.14
@@ -287,24 +303,38 @@ let version = Version::normal(5)?;
 let micro = Version::micro(2)?;
 ```
 
-`Version::normal` and `Version::micro` return `Err(QrError::InvalidVersion)`
-outside 1..=40 and 1..=4 respectively, and `Version::number()` reads the number
-back. Matching on a `Version` is no longer possible; use `is_micro()`,
-`number()` and `width()`.
+`Version::normal` ve `Version::micro`, sırasıyla 1..=40 ve 1..=4 dışındaki
+değerler için `Err(QrError::InvalidVersion)` döndürür. Sayı
+`Version::number()` ile geri okunabilir. Artık bir `Version` üzerinde doğrudan
+varyant eşleştirmesi yapılamaz; `is_micro()`, `number()` ve `width()` kullanın.
 
-The other breaking changes:
+Diğer kırıcı değişiklikler:
 
-* `Version::fetch` takes `&[[T; 4]; VERSION_COUNT]` instead of a slice, so a
-  short table is a compile error rather than an index panic. It now also rejects
-  a default-valued entry for normal versions, matching what it already did for
-  Micro ones.
-* `ec::create_error_correction_code` returns `QrResult<Vec<u8>>`; sizes above
-  `ec::MAX_EC_CODE_SIZE` are an error rather than an index panic.
-* `ec::construct_codewords` validates the length of `rawbits` instead of
-  asserting it only in debug builds.
-* `Canvas::apply_best_mask` returns `QrResult<Canvas>`.
-* `QrError` gained `InvalidMaskPattern`, `CoordinateOutOfRange` and
-  `ImageTooLarge`, and implements `core::error::Error` in `no_std` builds too.
-* `push_numeric_data`, `push_alphanumeric_data` and `push_kanji_data` return
-  `Err(QrError::InvalidCharacter)` for bytes outside their character set. The
-  alphanumeric encoder previously encoded them as the digit `0`.
+* `Version::fetch`, dilim yerine `&[[T; 4]; VERSION_COUNT]` alır. Kısa bir tablo
+  artık indeks paniği değil derleme hatasıdır. Varsayılan değerli normal sürüm
+  girdileri de Micro sürümlerde olduğu gibi reddedilir.
+* `Segment` alanları özeldir. `Segment::new(mode, begin, end)` aralığı
+  doğrular; `mode()`, `begin()` ve `end()` erişim için kullanılabilir.
+* `Parser::new` aşırı uzun girdiyi daha toplamadan reddettiği için
+  `QrResult<Parser>` döndürür. Mutlak ham girdi sınırı `MAX_INPUT_BYTES` ile
+  yayımlanır.
+* `Mode::data_bits_count` ve `total_encoded_len` aritmetik taşmayı
+  `QrError::DataTooLong` olarak bildirmek için `QrResult` döndürür.
+* `ec::create_error_correction_code`, `QrResult<Vec<u8>>` döndürür;
+  `ec::MAX_EC_CODE_SIZE` üzerindeki boyutlar indeks paniği yerine hatadır.
+* `ec::construct_codewords`, `rawbits` uzunluğunu yalnızca hata ayıklama derlemesinde
+  assert etmek yerine her profilde doğrular.
+* `Canvas::draw_data`, kod kelimesi uzunluklarını ve çağrı sırasını doğrular;
+  `QrResult<()>` döndürür. `Canvas::apply_best_mask` da
+  `QrResult<Canvas>` döndürür.
+* `canvas::is_functional`, genişliği `Version`dan türetir; fazladan `width`
+  parametresi kaldırılmıştır.
+* `QrError`; `InvalidSegment`, `InvalidDataLength`, `InvalidCanvasState`,
+  `InvalidMaskPattern`, `CoordinateOutOfRange` ve `ImageTooLarge` varyantlarını
+  kazanmıştır. `no_std` derlemelerinde de `core::error::Error` uygular.
+* `push_numeric_data`, `push_alphanumeric_data` ve `push_kanji_data`, kendi
+  karakter kümesinin dışındaki baytlar için `Err(QrError::InvalidCharacter)`
+  döndürür. Başarısız bir yazım mevcut `Bits` değerini değiştirmez.
+* SVG renkleri XML özniteliklerine eklenmeden önce kaçışlanır.
+* Kararsız `bench` özelliği kaldırılmıştır; tüm özellikler kararlı Rust ile
+  birlikte sınanabilir.

@@ -1,4 +1,4 @@
-// Örnekler demoyu kısa tutmak için unwrap kullanır; kütüphane kodu kullanamaz --
+// Örnekler gösterimi kısa tutmak için unwrap kullanır; kütüphane kodu kullanamaz --
 // bkz. Cargo.toml'daki [lints.clippy] kapısı.
 #![allow(clippy::unwrap_used, reason = "örnek kod")]
 

@@ -14,13 +14,13 @@ libfuzzer-sys = "0.4"
 [dependencies.qrcode]
 path = ".."
 
-# `cargo fuzz` builds these itself.
+# Bunları `cargo fuzz` kendisi derler.
 [workspace]
 members = ["."]
 
 [profile.release]
 debug = true
-# The whole point is to catch arithmetic that silently wraps in release builds.
+# Amaç, yayın derlemelerinde sessizce sarılan aritmetiği yakalamaktır.
 overflow-checks = true
 
 [[bin]]

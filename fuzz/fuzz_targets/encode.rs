@@ -1,7 +1,7 @@
 //! Kodlayıcıyı rastgele yükler ve sürüm/ec bileşimleri üzerinde sürer.
 //!
 //! Test edilen sözleşme: herhangi bir girdi için `qrcode` ya bir sembol üretir
-//! ya da bir `QrError` döndürür. Asla abort etmez. `overflow-checks = true` ile
+//! ya da bir `QrError` döndürür. Asla süreci sonlandırmaz. `overflow-checks = true` ile
 //! derlenir, yani normal bir release derlemesinde sessizce sarmalanacak
 //! aritmetik burada başarısız olur.
 
