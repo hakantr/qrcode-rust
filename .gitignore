@@ -4,4 +4,10 @@
 .DS_Store
 *.o
 __pycache__
-Cargo.lock
+
+# Kök Cargo.lock bilinçli olarak yok sayılmıyor: bu paket bir ikili
+# (`qrencode`) yayımlıyor ve CI 1.95.0 MSRV'sini sabitliyor. Kilit dosyası
+# olmadan yeni bir bağımlılık sürümü, bu depoda hiçbir şey değişmeden MSRV
+# işini kırabilir. Fuzz çalışma alanı ayrı: onun kilidini `cargo fuzz` yönetir
+# ve CI her koşuda taze bir cargo-fuzz kurar.
+/fuzz/Cargo.lock

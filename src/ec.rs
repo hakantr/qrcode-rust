@@ -225,9 +225,17 @@ pub fn max_allowed_errors(version: Version, ec_level: EcLevel) -> QrResult<usize
     use crate::EcLevel::{L, M};
     use crate::types::VersionKind::{Micro, Normal};
 
+    // `p`, ISO/IEC 18004:2006 §6.5.1 Tablo 9'daki yanlış-kod-çözme koruma kod
+    // kelimesi sayısıdır: hata *düzeltmeye* değil, yalnızca hata saptamaya
+    // ayrılır, bu yüzden düzeltilebilir hata sayısından düşülür.
+    //
+    // Her Micro sembolü en az iki koruma kod kelimesi harcar; eskiden yalnızca
+    // L seviyesi ile M2-M için düşülüyor, M3-M / M4-M / M4-Q ise koruma
+    // kod kelimelerini düzeltme bütçesi sayarak kapasiteyi olduğundan yüksek
+    // bildiriyordu.
     let p = match (version.kind(), ec_level) {
         (Micro(2) | Normal(1), L) => 3,
-        (Micro(_) | Normal(2), L) | (Micro(2) | Normal(1), M) => 2,
+        (Micro(_), _) | (Normal(2), L) | (Normal(1), M) => 2,
         (Normal(1), _) | (Normal(3), L) => 1,
         _ => 0,
     };
@@ -252,11 +260,11 @@ mod max_allowed_errors_test {
         assert_eq!(Ok(2), max_allowed_errors(Version::micro(2).unwrap(), EcLevel::M));
 
         assert_eq!(Ok(2), max_allowed_errors(Version::micro(3).unwrap(), EcLevel::L));
-        assert_eq!(Ok(4), max_allowed_errors(Version::micro(3).unwrap(), EcLevel::M));
+        assert_eq!(Ok(3), max_allowed_errors(Version::micro(3).unwrap(), EcLevel::M));
 
         assert_eq!(Ok(3), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::L));
-        assert_eq!(Ok(5), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::M));
-        assert_eq!(Ok(7), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::Q));
+        assert_eq!(Ok(4), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::M));
+        assert_eq!(Ok(6), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::Q));
 
         assert_eq!(Ok(2), max_allowed_errors(Version::normal(1).unwrap(), EcLevel::L));
         assert_eq!(Ok(4), max_allowed_errors(Version::normal(1).unwrap(), EcLevel::M));
@@ -277,6 +285,27 @@ mod max_allowed_errors_test {
         assert_eq!(Ok(18), max_allowed_errors(Version::normal(4).unwrap(), EcLevel::M));
         assert_eq!(Ok(26), max_allowed_errors(Version::normal(4).unwrap(), EcLevel::Q));
         assert_eq!(Ok(32), max_allowed_errors(Version::normal(4).unwrap(), EcLevel::H));
+    }
+
+    /// `p`, blok başına hata düzeltme bütçesinden düşülüyor; standardın
+    /// tanımladığı hiçbir sembolde bu çıkarma taşmamalı ve sonuç kod
+    /// kelimelerinin yarısını aşmamalıdır.
+    #[test]
+    fn test_every_symbol_has_a_representable_capacity() {
+        use crate::bits::all_versions;
+        use crate::ec::{DATA_BYTES_PER_BLOCK, EC_BYTES_PER_BLOCK};
+
+        for version in all_versions() {
+            for ec_level in [EcLevel::L, EcLevel::M, EcLevel::Q, EcLevel::H] {
+                let Ok(errors) = max_allowed_errors(version, ec_level) else {
+                    continue; // standartta olmayan sürüm / seviye bileşimi
+                };
+                let ec_per_block = version.fetch(ec_level, &EC_BYTES_PER_BLOCK).unwrap();
+                let (_, count1, _, count2) = version.fetch(ec_level, &DATA_BYTES_PER_BLOCK).unwrap();
+                let ec_bytes = (count1 + count2) * ec_per_block;
+                assert!(errors * 2 <= ec_bytes, "{version:?} {ec_level:?}: {errors} > {ec_bytes}/2");
+            }
+        }
     }
 
     #[test]

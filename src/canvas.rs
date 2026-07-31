@@ -2047,8 +2047,10 @@ impl Canvas {
     /// Bu ceza puanı Micro QR koduna özgüdür.
     ///
     /// Standardın bu metodun tersi anlama gelen *verimlilik* puanı formülünü
-    /// verdiğine dikkat edin, ancak ikisi arasında dönüşüm çok kolaydır (bu puan
-    /// (16×width − standart-puan) değeridir).
+    /// verdiğine dikkat edin, ancak ikisi arasında dönüşüm çok kolaydır: kenar
+    /// başına `width - 1` modül sayıldığından bu puan
+    /// (17×(width − 1) − standart-puan) değeridir. Fark bir sembol içinde sabit
+    /// olduğu için maske sıralaması standarttakiyle aynı kalır.
     fn compute_light_side_penalty_score(&self) -> u32 {
         let h = (1..self.width).filter(|j| !self.get(*j, -1).is_dark()).count();
         let v = (1..self.width).filter(|j| !self.get(-1, *j).is_dark()).count();

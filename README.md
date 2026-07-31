@@ -336,5 +336,9 @@ Diğer kırıcı değişiklikler:
   karakter kümesinin dışındaki baytlar için `Err(QrError::InvalidCharacter)`
   döndürür. Başarısız bir yazım mevcut `Bits` değerini değiştirmez.
 * SVG renkleri XML özniteliklerine eklenmeden önce kaçışlanır.
+* `ec::max_allowed_errors`, Micro QR sembollerinde yanlış-kod-çözme koruma kod
+  kelimelerini (ISO/IEC 18004:2006 Tablo 9'daki `p`) artık her hata düzeltme
+  seviyesinde düşer. M3-M, M4-M ve M4-Q eskiden kapasiteyi olduğundan yüksek
+  bildiriyordu; sırasıyla 4→3, 5→4 ve 7→6 olarak düzeltildi.
 * Kararsız `bench` özelliği kaldırılmıştır; tüm özellikler kararlı Rust ile
   birlikte sınanabilir.

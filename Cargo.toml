@@ -13,11 +13,18 @@ readme = "README.md"
 documentation = "https://docs.rs/qrcode"
 exclude = [
     "fuzz/**",
-    ".travis.yml", ".gitignore", "test-data/**"
+    ".github/**", ".gitignore",
 ]
 
 [badges]
 maintenance = { status = "passively-maintained" }
+
+# `src/lib.rs` özellik rozetlerini `doc_auto_cfg` ile üretiyor; bu, yalnızca
+# `docsrs` cfg'i ayarlandığında etkinleşir. Bu bölüm olmadan docs.rs onu asla
+# tanımlamaz ve rozetler sessizce hiç görünmez.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 # Kamu API'sine verilen geçersiz dış girdiler, olağan çalışma zamanı hataları ve
 # desteklenmeyen seçenekler kasıtlı olarak paniklemez; yapılandırılmış bir
