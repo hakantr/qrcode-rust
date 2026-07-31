@@ -1,9 +1,9 @@
-//! The `bits` module encodes binary data into raw bits used in a QR code.
+//! `bits` modülü ikili veriyi bir QR kodunda kullanılan ham bitlere kodlar.
 
-// The binary literals in this module's tests are grouped along the QR code bit
-// field boundaries (mode indicator, character count, data) rather than in even
-// nibbles. That is what makes them checkable against ISO/IEC 18004 by eye, so
-// the two literal-formatting lints are deliberately off here.
+// Bu modülün testlerindeki ikili literaller eşit uzunlukta dörtlükler yerine
+// QR kodu bit alanı sınırlarına (mod göstergesi, karakter sayısı, veri) göre
+// gruplanmıştır. Onları ISO/IEC 18004'e karşı gözle denetlenebilir kılan da
+// budur; bu yüzden iki literal biçimlendirme linti burada bilinçli olarak kapalı.
 #![allow(clippy::unusual_byte_groupings, clippy::unreadable_literal)]
 
 use alloc::vec::Vec;
@@ -19,7 +19,7 @@ use crate::types::{EcLevel, Mode, QrError, QrResult, Version, VersionKind};
 //------------------------------------------------------------------------------
 //{{{ Bits
 
-/// The `Bits` structure stores the encoded data for a QR code.
+/// `Bits` yapısı bir QR kodu için kodlanmış veriyi saklar.
 pub struct Bits {
     data: Vec<u8>,
     bit_offset: usize,
@@ -27,16 +27,16 @@ pub struct Bits {
 }
 
 impl Bits {
-    /// Constructs a new, empty bits structure.
+    /// Yeni, boş bir bit yapısı kurar.
     pub const fn new(version: Version) -> Self {
         Self { data: Vec::new(), bit_offset: 0, version }
     }
 
-    /// Pushes an N-bit big-endian integer to the end of the bits.
+    /// Bitlerin sonuna N bitlik büyük-endian bir tam sayı ekler.
     ///
-    /// Note: It is up to the developer to ensure that `number` really only is
-    /// `n` bit in size. Otherwise the excess bits may stomp on the existing
-    /// ones.
+    /// Not: `number`'ın gerçekten yalnızca `n` bit boyutunda olmasını sağlamak
+    /// geliştiricinin sorumluluğundadır. Aksi hâlde fazla bitler mevcut olanların
+    /// üzerine basabilir.
     fn push_number(&mut self, n: usize, number: u16) {
         debug_assert!(n == 16 || n < 16 && number < (1 << n), "{number} is too big as a {n}-bit number");
 
@@ -49,8 +49,8 @@ impl Bits {
                 self.data.push((number >> (b - 8)).truncate_as_u8());
                 self.data.push((number << (16 - b)).truncate_as_u8());
             }
-            // A non-zero `bit_offset` means the last byte is partially filled,
-            // so `last_mut()` is always `Some` in the arms below.
+            // Sıfırdan farklı bir `bit_offset`, son baytın kısmen dolu olduğu anlamına
+            // gelir; yani aşağıdaki kollarda `last_mut()` her zaman `Some`'dur.
             (_, 0..=8) => {
                 if let Some(last) = self.data.last_mut() {
                     *last |= (number << (8 - b)).truncate_as_u8();
@@ -73,10 +73,10 @@ impl Bits {
         self.bit_offset = b & 7;
     }
 
-    /// Pushes an N-bit big-endian integer to the end of the bits, and check
-    /// that the number does not overflow the bits.
+    /// Bitlerin sonuna N bitlik büyük-endian bir tam sayı ekler ve sayının bitleri
+    /// taşırmadığını kontrol eder.
     ///
-    /// Returns `Err(QrError::DataTooLong)` on overflow.
+    /// Taşma durumunda `Err(QrError::DataTooLong)` döndürür.
     fn push_number_checked(&mut self, n: usize, number: usize) -> QrResult<()> {
         if n > 16 || number >= (1 << n) {
             Err(QrError::DataTooLong)
@@ -86,40 +86,40 @@ impl Bits {
         }
     }
 
-    /// Reserves `n` extra bits of space for pushing.
+    /// Ekleme için `n` bitlik ek alan ayırır.
     fn reserve(&mut self, n: usize) {
         let extra_bytes = (n + (8 - self.bit_offset) % 8).div_ceil(8);
         self.data.reserve(extra_bytes);
     }
 
-    /// Convert the bits into a bytes vector.
+    /// Bitleri bir bayt vektörüne dönüştürür.
     pub fn into_bytes(self) -> Vec<u8> {
         self.data
     }
 
-    /// Total number of bits currently pushed.
+    /// Şu ana dek eklenmiş toplam bit sayısı.
     pub fn len(&self) -> usize {
         if self.bit_offset == 0 { self.data.len() * 8 } else { (self.data.len() - 1) * 8 + self.bit_offset }
     }
 
-    /// Whether there are any bits pushed.
+    /// Hiç bit eklenip eklenmediği.
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
-    /// The maximum number of bits allowed by the provided QR code version and
-    /// error correction level.
+    /// Verilen QR kodu sürümü ve hata düzeltme seviyesinin izin verdiği en fazla
+    /// bit sayısı.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::InvalidVersion)` if it is not valid to use the
-    /// `ec_level` for the given version (e.g. `Version::micro(1)` with
-    /// `EcLevel::H`).
+    /// Verilen sürüm için `ec_level` kullanmak geçerli değilse (örneğin
+    /// `EcLevel::H` ile `Version::micro(1)`) `Err(QrError::InvalidVersion)`
+    /// döndürür.
     pub fn max_len(&self, ec_level: EcLevel) -> QrResult<usize> {
         self.version.fetch(ec_level, &DATA_LENGTHS)
     }
 
-    /// Version of the QR code.
+    /// QR kodunun sürümü.
     pub const fn version(&self) -> Version {
         self.version
     }
@@ -173,33 +173,33 @@ fn bench_push_splitted_bytes(bencher: &mut test::Bencher) {
 //------------------------------------------------------------------------------
 //{{{ Mode indicator
 
-/// An "extended" mode indicator, includes all indicators supported by QR code
-/// beyond those bearing data.
+/// Veri taşıyanların ötesinde QR kodunun desteklediği tüm göstergeleri içeren
+/// "genişletilmiş" mod göstergesi.
 #[derive(Copy, Clone)]
 pub enum ExtendedMode {
-    /// ECI mode indicator, to introduce an ECI designator.
+    /// Bir ECI tanımlayıcısı tanıtmak için ECI mod göstergesi.
     Eci,
 
-    /// The normal mode to introduce data.
+    /// Veri tanıtmak için normal mod.
     Data(Mode),
 
-    /// FNC-1 mode in the first position.
+    /// İlk konumda FNC-1 modu.
     Fnc1First,
 
-    /// FNC-1 mode in the second position.
+    /// İkinci konumda FNC-1 modu.
     Fnc1Second,
 
-    /// Structured append.
+    /// Yapılandırılmış ekleme.
     StructuredAppend,
 }
 
 impl Bits {
-    /// Push the mode indicator to the end of the bits.
+    /// Bitlerin sonuna mod göstergesini ekler.
     ///
     /// # Errors
     ///
-    /// If the mode is not supported in the provided version, this method
-    /// returns `Err(QrError::UnsupportedCharacterSet)`.
+    /// Mod verilen sürümde desteklenmiyorsa bu metot
+    /// `Err(QrError::UnsupportedCharacterSet)` döndürür.
     pub fn push_mode_indicator(&mut self, mode: ExtendedMode) -> QrResult<()> {
         let number = match (self.version.kind(), mode) {
             (VersionKind::Micro(1), ExtendedMode::Data(Mode::Numeric)) => return Ok(()),
@@ -227,11 +227,11 @@ impl Bits {
 //{{{ ECI
 
 impl Bits {
-    /// Push an ECI (Extended Channel Interpretation) designator to the bits.
+    /// Bitlere bir ECI (Extended Channel Interpretation) tanımlayıcısı ekler.
     ///
-    /// An ECI designator is a 6-digit number to specify the character set of
-    /// the following binary data. After calling this method, one could call
-    /// `.push_byte_data()` or similar methods to insert the actual data, e.g.
+    /// Bir ECI tanımlayıcısı, ardından gelen ikili verinin karakter kümesini
+    /// belirten 6 haneli bir sayıdır. Bu metodu çağırdıktan sonra gerçek veriyi
+    /// eklemek için `.push_byte_data()` ya da benzeri metotlar çağrılabilir, ör.
     ///
     /// ```
     /// #![allow(unused_must_use)]
@@ -244,29 +244,30 @@ impl Bits {
     /// bits.push_byte_data(b"\xa1\xa2\xa3\xa4\xa5"); // ΑΒΓΔΕ
     /// ```
     ///
-    /// The full list of ECI designator values can be found from
-    /// <http://strokescribe.com/en/ECI.html>. Some example values are:
+    /// ECI tanımlayıcı değerlerinin tam listesi
+    /// <http://strokescribe.com/en/ECI.html> adresinde bulunabilir. Bazı örnek
+    /// değerler:
     ///
-    /// | ECI # | Character set                             |
+    /// | ECI # | Karakter kümesi                           |
     /// | ----- | ----------------------------------------- |
-    /// | 3     | ISO-8859-1 (Western European)             |
-    /// | 20    | Shift JIS (Japanese)                      |
-    /// | 23    | Windows 1252 (Latin 1) (Western European) |
+    /// | 3     | ISO-8859-1 (Batı Avrupa)                  |
+    /// | 20    | Shift JIS (Japonca)                       |
+    /// | 23    | Windows 1252 (Latin 1) (Batı Avrupa)      |
     /// | 25    | UTF-16 Big Endian                         |
     /// | 26    | UTF-8                                     |
-    /// | 28    | Big 5 (Traditional Chinese)               |
-    /// | 29    | GB-18030 (Simplified Chinese)             |
-    /// | 30    | EUC-KR (Korean)                           |
+    /// | 28    | Big 5 (Geleneksel Çince)                  |
+    /// | 29    | GB-18030 (Basitleştirilmiş Çince)         |
+    /// | 30    | EUC-KR (Korece)                           |
     ///
     /// # Errors
     ///
-    /// If the QR code version does not support ECI, this method will return
-    /// `Err(QrError::UnsupportedCharacterSet)`.
+    /// QR kodu sürümü ECI'yi desteklemiyorsa bu metot
+    /// `Err(QrError::UnsupportedCharacterSet)` döndürür.
     ///
-    /// If the designator is outside of the expected range, this method will
-    /// return `Err(QrError::InvalidECIDesignator)`.
+    /// Tanımlayıcı beklenen aralığın dışındaysa bu metot
+    /// `Err(QrError::InvalidECIDesignator)` döndürür.
     pub fn push_eci_designator(&mut self, eci_designator: u32) -> QrResult<()> {
-        self.reserve(12); // assume the common case that eci_designator <= 127.
+        self.reserve(12); // eci_designator <= 127 olan yaygın durumu varsayıyoruz.
         self.push_mode_indicator(ExtendedMode::Eci)?;
         match eci_designator {
             0..=127 => {
@@ -340,16 +341,16 @@ impl Bits {
         Ok(())
     }
 
-    /// Encodes a numeric string to the bits.
+    /// Bitlere sayısal bir dizgi kodlar.
     ///
-    /// The data should only contain the characters 0 to 9.
+    /// Veri yalnızca 0-9 karakterlerini içermelidir.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::DataTooLong)` on overflow.
+    /// Taşma durumunda `Err(QrError::DataTooLong)` döndürür.
     ///
-    /// Returns `Err(QrError::InvalidCharacter)` if the data contains a byte
-    /// which is not an ASCII digit.
+    /// Veri ASCII rakamı olmayan bir bayt içeriyorsa
+    /// `Err(QrError::InvalidCharacter)` döndürür.
     pub fn push_numeric_data(&mut self, data: &[u8]) -> QrResult<()> {
         self.push_header(Mode::Numeric, data.len())?;
         for chunk in data.chunks(3) {
@@ -365,11 +366,11 @@ impl Bits {
     }
 }
 
-/// In QR code `Mode::Numeric` mode, a triple of digits is encoded as a base-10
-/// integer. `numeric_digit` converts a single character into its corresponding
-/// base-10 digit, or `None` if it is not an ASCII digit.
+/// QR kodu `Mode::Numeric` modunda üçlü rakam grupları 10 tabanlı bir tam sayı
+/// olarak kodlanır. `numeric_digit` tek bir karakteri karşılık gelen 10 tabanlı
+/// rakama, ASCII rakamı değilse `None`'a dönüştürür.
 ///
-/// The conversion is specified in ISO/IEC 18004:2006, §8.4.2.
+/// Dönüşüm ISO/IEC 18004:2006, §8.4.2'de tanımlanmıştır.
 #[inline]
 const fn numeric_digit(character: u8) -> Option<u16> {
     match character {
@@ -441,7 +442,7 @@ mod numeric_tests {
 
     #[test]
     fn test_invalid_character() {
-        // These used to overflow `*b - b'0'` and abort the process instead.
+        // Bunlar eskiden `*b - b'0'` işlemini taşırıp süreci abort ediyordu.
         for data in [&b"12/45"[..], b"!!", b"\xff\xff", b" 1"] {
             let mut bits = Bits::new(Version::normal(1).unwrap());
             assert_eq!(bits.push_numeric_data(data), Err(QrError::InvalidCharacter), "{data:?}");
@@ -453,13 +454,13 @@ mod numeric_tests {
 //------------------------------------------------------------------------------
 //{{{ Mode::Alphanumeric mode
 
-/// In QR code `Mode::Alphanumeric` mode, a pair of alphanumeric characters will
-/// be encoded as a base-45 integer. `alphanumeric_digit` converts each
-/// character into its corresponding base-45 digit.
+/// QR kodu `Mode::Alphanumeric` modunda alfanümerik karakter çiftleri 45
+/// tabanlı bir tam sayı olarak kodlanır. `alphanumeric_digit` her karakteri
+/// karşılık gelen 45 tabanlı rakama dönüştürür.
 ///
-/// The conversion is specified in ISO/IEC 18004:2006, §8.4.3, Table 5.
+/// Dönüşüm ISO/IEC 18004:2006, §8.4.3, Tablo 5'te tanımlanmıştır.
 ///
-/// Returns `None` if the character is outside of the alphanumeric character set.
+/// Karakter alfanümerik karakter kümesinin dışındaysa `None` döndürür.
 #[inline]
 const fn alphanumeric_digit(character: u8) -> Option<u16> {
     Some(match character {
@@ -479,17 +480,18 @@ const fn alphanumeric_digit(character: u8) -> Option<u16> {
 }
 
 impl Bits {
-    /// Encodes an alphanumeric string to the bits.
+    /// Bitlere alfanümerik bir dizgi kodlar.
     ///
-    /// The data should only contain the charaters A to Z (excluding lowercase),
-    /// 0 to 9, space, `$`, `%`, `*`, `+`, `-`, `.`, `/` or `:`.
+    /// Veri yalnızca A-Z harflerini (küçük harfler hariç), 0-9 rakamlarını,
+    /// boşluğu, `$`, `%`, `*`, `+`, `-`, `.`, `/` ya da `:` karakterlerini
+    /// içermelidir.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::DataTooLong)` on overflow.
+    /// Taşma durumunda `Err(QrError::DataTooLong)` döndürür.
     ///
-    /// Returns `Err(QrError::InvalidCharacter)` if the data contains a byte
-    /// outside of the alphanumeric character set.
+    /// Veri alfanümerik karakter kümesi dışında bir bayt içeriyorsa
+    /// `Err(QrError::InvalidCharacter)` döndürür.
     pub fn push_alphanumeric_data(&mut self, data: &[u8]) -> QrResult<()> {
         self.push_header(Mode::Alphanumeric, data.len())?;
         for chunk in data.chunks(2) {
@@ -535,8 +537,8 @@ mod alphanumeric_tests {
 
     #[test]
     fn test_invalid_character() {
-        // Lowercase letters and other symbols used to be silently encoded as
-        // the digit 0, corrupting the payload without any error.
+        // Küçük harfler ve diğer semboller eskiden sessizce 0 rakamı olarak
+        // kodlanıyor, yükü hiçbir hata vermeden bozuyordu.
         for data in [&b"abc"[..], b"A;B", b"\x00", b"A\x1dB"] {
             let mut bits = Bits::new(Version::normal(1).unwrap());
             assert_eq!(bits.push_alphanumeric_data(data), Err(QrError::InvalidCharacter), "{data:?}");
@@ -549,11 +551,11 @@ mod alphanumeric_tests {
 //{{{ Mode::Byte mode
 
 impl Bits {
-    /// Encodes 8-bit byte data to the bits.
+    /// Bitlere 8 bitlik bayt verisi kodlar.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::DataTooLong)` on overflow.
+    /// Taşma durumunda `Err(QrError::DataTooLong)` döndürür.
     pub fn push_byte_data(&mut self, data: &[u8]) -> QrResult<()> {
         self.push_header(Mode::Byte, data.len())?;
         for b in data {
@@ -608,15 +610,15 @@ mod byte_tests {
 //{{{ Mode::Kanji mode
 
 impl Bits {
-    /// Encodes Shift JIS double-byte data to the bits.
+    /// Bitlere Shift JIS çift baytlı veri kodlar.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::DataTooLong)` on overflow.
+    /// Taşma durumunda `Err(QrError::DataTooLong)` döndürür.
     ///
-    /// Returns `Err(QrError::InvalidCharacter)` if the data is not Shift JIS
-    /// double-byte data (e.g. if the length of data is not an even number, or
-    /// if a character is outside of the ranges encodable in Kanji mode).
+    /// Veri Shift JIS çift baytlı veri değilse (örneğin verinin uzunluğu çift
+    /// sayı değilse ya da bir karakter Kanji modunda kodlanabilir aralıkların
+    /// dışındaysa) `Err(QrError::InvalidCharacter)` döndürür.
     pub fn push_kanji_data(&mut self, data: &[u8]) -> QrResult<()> {
         self.push_header(Mode::Kanji, data.len() / 2)?;
         for kanji in data.chunks(2) {
@@ -624,10 +626,10 @@ impl Bits {
                 return Err(QrError::InvalidCharacter);
             };
             let cp = u16::from(hi) * 256 + u16::from(lo);
-            // ISO/IEC 18004:2006 §8.4.5 — only these two ranges are compactable
-            // into the 13 bits of a Kanji mode character. Anything else (e.g.
-            // ASCII, or a lead byte of 0xeb followed by a high trail byte) would
-            // underflow the subtraction or overflow the 13-bit field.
+            // ISO/IEC 18004:2006 §8.4.5 — yalnızca bu iki aralık bir Kanji modu
+            // karakterinin 13 bitine sıkıştırılabilir. Başka her şey (ör. ASCII ya da
+            // 0xeb öncü baytının ardından yüksek bir izleyen bayt) çıkarmayı taşırır ya
+            // da 13 bitlik alanı aşar.
             let bytes = match cp {
                 0x8140..=0x9ffc => cp - 0x8140,
                 0xe040..=0xebbf => cp - 0xc140,
@@ -668,8 +670,8 @@ mod kanji_tests {
 
     #[test]
     fn test_invalid_character() {
-        // `b"AA"` used to overflow `cp - 0x8140`, and `b"\xeb\xc0"` used to
-        // overflow the 13-bit field and stomp on the neighbouring bits.
+        // `b"AA"` eskiden `cp - 0x8140` işlemini taşırıyordu ve `b"\xeb\xc0"` 13
+        // bitlik alanı aşıp komşu bitlerin üzerine basıyordu.
         for data in [&b"AA"[..], b"\x00\x00", b"\xeb\xc0", b"\x9f\xfd", b"\xe0\x3f", b"\xff\xff"] {
             let mut bits = Bits::new(Version::normal(1).unwrap());
             assert_eq!(bits.push_kanji_data(data), Err(QrError::InvalidCharacter), "{data:?}");
@@ -678,7 +680,7 @@ mod kanji_tests {
 
     #[test]
     fn test_boundary_characters() {
-        // The extremes of both ranges must still round-trip successfully.
+        // Her iki aralığın uçları hâlâ başarıyla gidip gelebilmeli.
         for data in [&b"\x81\x40"[..], b"\x9f\xfc", b"\xe0\x40", b"\xeb\xbf"] {
             let mut bits = Bits::new(Version::normal(1).unwrap());
             assert_eq!(bits.push_kanji_data(data), Ok(()), "{data:?}");
@@ -691,8 +693,8 @@ mod kanji_tests {
 //{{{ FNC1 mode
 
 impl Bits {
-    /// Encodes an indicator that the following data are formatted according to
-    /// the UCC/EAN Application Identifiers standard.
+    /// Ardından gelen verinin UCC/EAN Application Identifiers standardına göre
+    /// biçimlendirildiğini belirten bir gösterge kodlar.
     ///
     /// ```
     /// #![allow(unused_must_use)]
@@ -706,19 +708,19 @@ impl Bits {
     /// bits.push_alphanumeric_data(b"%10ABC123");
     /// ```
     ///
-    /// In QR code, the character `%` is used as the data field separator (0x1D).
+    /// QR kodunda `%` karakteri veri alanı ayırıcısı (0x1D) olarak kullanılır.
     ///
     /// # Errors
     ///
-    /// If the mode is not supported in the provided version, this method
-    /// returns `Err(QrError::UnsupportedCharacterSet)`.
+    /// Mod verilen sürümde desteklenmiyorsa bu metot
+    /// `Err(QrError::UnsupportedCharacterSet)` döndürür.
     pub fn push_fnc1_first_position(&mut self) -> QrResult<()> {
         self.push_mode_indicator(ExtendedMode::Fnc1First)
     }
 
-    /// Encodes an indicator that the following data are formatted in accordance
-    /// with specific industry or application specifications previously agreed
-    /// with AIM International.
+    /// Ardından gelen verinin, AIM International ile önceden mutabık kalınmış
+    /// belirli bir sektör ya da uygulama şartnamesine göre biçimlendirildiğini
+    /// belirten bir gösterge kodlar.
     ///
     /// ```
     /// #![allow(unused_must_use)]
@@ -732,8 +734,8 @@ impl Bits {
     /// bits.push_byte_data(b"text text text text\r");
     /// ```
     ///
-    /// If the application indicator is a single Latin alphabet (a–z / A–Z),
-    /// please pass in its ASCII value + 100:
+    /// Uygulama göstergesi tek bir Latin harfiyse (a–z / A–Z) lütfen ASCII
+    /// değerine 100 ekleyerek geçin:
     ///
     /// ```ignore
     /// bits.push_fnc1_second_position(b'A' + 100);
@@ -741,8 +743,8 @@ impl Bits {
     ///
     /// # Errors
     ///
-    /// If the mode is not supported in the provided version, this method
-    /// returns `Err(QrError::UnsupportedCharacterSet)`.
+    /// Mod verilen sürümde desteklenmiyorsa bu metot
+    /// `Err(QrError::UnsupportedCharacterSet)` döndürür.
     pub fn push_fnc1_second_position(&mut self, application_indicator: u8) -> QrResult<()> {
         self.push_mode_indicator(ExtendedMode::Fnc1Second)?;
         self.push_number(8, u16::from(application_indicator));
@@ -754,9 +756,9 @@ impl Bits {
 //------------------------------------------------------------------------------
 //{{{ Finish
 
-// This table is copied from ISO/IEC 18004:2006 §6.4.10, Table 7.
+// Bu tablo ISO/IEC 18004:2006 §6.4.10, Tablo 7'den kopyalanmıştır.
 static DATA_LENGTHS: [[usize; 4]; 44] = [
-    // Normal versions
+    // Normal sürümler
     [152, 128, 104, 72],
     [272, 224, 176, 128],
     [440, 352, 272, 208],
@@ -797,7 +799,7 @@ static DATA_LENGTHS: [[usize; 4]; 44] = [
     [21616, 16816, 12016, 9136],
     [22496, 17728, 12656, 9776],
     [23648, 18672, 13328, 10208],
-    // Micro versions
+    // Micro sürümler
     [20, 0, 0, 0],
     [40, 32, 0, 0],
     [84, 68, 0, 0],
@@ -805,15 +807,15 @@ static DATA_LENGTHS: [[usize; 4]; 44] = [
 ];
 
 impl Bits {
-    /// Pushes the ending bits to indicate no more data.
+    /// Daha fazla veri olmadığını belirten bitiş bitlerini ekler.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::DataTooLong)` on overflow.
+    /// Taşma durumunda `Err(QrError::DataTooLong)` döndürür.
     ///
-    /// Returns `Err(QrError::InvalidVersion)` if it is not valid to use the
-    /// `ec_level` for the given version (e.g. `Version::micro(1)` with
-    /// `EcLevel::H`).
+    /// Verilen sürüm için `ec_level` kullanmak geçerli değilse (örneğin
+    /// `EcLevel::H` ile `Version::micro(1)`) `Err(QrError::InvalidVersion)`
+    /// döndürür.
     pub fn push_terminator(&mut self, ec_level: EcLevel) -> QrResult<()> {
         let terminator_size = if let VersionKind::Micro(a) = self.version.kind() { a.as_usize() * 2 + 1 } else { 4 };
 
@@ -833,10 +835,10 @@ impl Bits {
 
             self.bit_offset = 0;
             let data_bytes_length = data_length / 8;
-            // `data_length` is not a multiple of 8 for Micro QR versions M1 and
-            // M3, whose final data codeword is only 4 bits wide. When the
-            // terminator lands inside that half codeword, `self.data` already
-            // holds `data_bytes_length + 1` bytes and no padding is due.
+            // Son veri kod kelimesi yalnızca 4 bit genişliğinde olan Micro QR sürümleri
+            // M1 ve M3 için `data_length` 8'in katı değildir. Sonlandırıcı o yarım kod
+            // kelimesinin içine düştüğünde `self.data` zaten `data_bytes_length + 1`
+            // bayt tutar ve dolgu gerekmez.
             let padding_bytes_count = data_bytes_length.saturating_sub(self.data.len());
             let padding = PADDING_BYTES.iter().copied().cycle().take(padding_bytes_count);
             self.data.extend(padding);
@@ -909,20 +911,20 @@ mod finish_tests {
         assert_eq!(bits.into_bytes(), vec![0b000_000_00, 0b11101100, 0]);
     }
 
-    /// M1 and M3 hold a non-multiple of 8 data bits, so the terminator may land
-    /// inside the trailing half codeword. Computing the padding used to
-    /// underflow there and abort the process.
+    /// M1 ve M3, 8'in katı olmayan sayıda veri biti tutar, yani sonlandırıcı
+    /// sondaki yarım kod kelimesinin içine düşebilir. Dolgunun hesaplanması
+    /// burada eskiden taşıyor ve süreci abort ediyordu.
     #[test]
     fn test_terminator_inside_trailing_half_codeword() {
-        // M3-L holds 84 bits; 20 digits occupy 74 and the 7-bit terminator
-        // brings that to 81, i.e. into the 11th (half) codeword.
+        // M3-L 84 bit tutar; 20 rakam 74 bit kaplar ve 7 bitlik sonlandırıcı bunu
+        // 81'e, yani 11. (yarım) kod kelimesine taşır.
         let mut bits = Bits::new(Version::micro(3).unwrap());
         assert_eq!(bits.push_numeric_data(b"01234567890123456789"), Ok(()));
         assert_eq!(bits.push_terminator(EcLevel::L), Ok(()));
         assert_eq!(bits.into_bytes().len(), 11);
 
-        // M1 holds 20 bits; two 1-digit segments occupy 14 and the terminator
-        // brings that to 17, i.e. into the 3rd (half) codeword.
+        // M1 20 bit tutar; 1'er rakamlık iki parça 14 bit kaplar ve sonlandırıcı
+        // bunu 17'ye, yani 3. (yarım) kod kelimesine taşır.
         let mut bits = Bits::new(Version::micro(1).unwrap());
         assert_eq!(bits.push_numeric_data(b"1"), Ok(()));
         assert_eq!(bits.push_numeric_data(b"2"), Ok(()));
@@ -930,8 +932,8 @@ mod finish_tests {
         assert_eq!(bits.into_bytes().len(), 3);
     }
 
-    /// Every version and error correction level must terminate into exactly the
-    /// number of codewords the error correction stage expects.
+    /// Her sürüm ve hata düzeltme seviyesi, hata düzeltme aşamasının beklediği
+    /// kod kelimesi sayısına tam olarak ulaşarak sonlanmalıdır.
     #[test]
     fn test_terminator_fills_every_symbol() {
         use crate::ec::construct_codewords;
@@ -940,7 +942,7 @@ mod finish_tests {
             for ec_level in [EcLevel::L, EcLevel::M, EcLevel::Q, EcLevel::H] {
                 let mut bits = Bits::new(version);
                 let Ok(()) = bits.push_terminator(ec_level) else {
-                    continue; // invalid version / ec level combination
+                    continue; // geçersiz sürüm / ec seviyesi bileşimi
                 };
                 let data = bits.into_bytes();
                 assert!(
@@ -953,7 +955,7 @@ mod finish_tests {
     }
 }
 
-/// Every version defined by the standard, used by the exhaustive tests.
+/// Kapsamlı testlerin kullandığı, standardın tanımladığı her sürüm.
 #[cfg(test)]
 pub(crate) fn all_versions() -> impl Iterator<Item = Version> {
     let normal = (1..=40).filter_map(|n| Version::normal(n).ok());
@@ -965,21 +967,21 @@ pub(crate) fn all_versions() -> impl Iterator<Item = Version> {
 //{{{ Front end.
 
 impl Bits {
-    /// Push a segmented data to the bits, and then terminate it.
+    /// Bitlere parçalanmış bir veri ekler ve ardından sonlandırır.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::DataTooLong)` on overflow.
+    /// Taşma durumunda `Err(QrError::DataTooLong)` döndürür.
     ///
-    /// Returns `Err(QrError::InvalidData)` if the segment refers to incorrectly
-    /// encoded byte sequence.
+    /// Parça yanlış kodlanmış bir bayt dizisine işaret ediyorsa
+    /// `Err(QrError::InvalidData)` döndürür.
     pub fn push_segments<I>(&mut self, data: &[u8], segments_iter: I) -> QrResult<()>
     where
         I: Iterator<Item = Segment>,
     {
         for segment in segments_iter {
-            // The segments may come from the caller rather than from `Parser`,
-            // so they are not guaranteed to index `data`.
+            // Parçalar `Parser` yerine çağırandan gelmiş olabilir, bu yüzden `data`'yı
+            // indeksleyecekleri garanti değildir.
             let slice = data.get(segment.begin..segment.end).ok_or(QrError::InvalidCharacter)?;
             match segment.mode {
                 Mode::Numeric => self.push_numeric_data(slice),
@@ -991,11 +993,11 @@ impl Bits {
         Ok(())
     }
 
-    /// Pushes the data the bits, using the optimal encoding.
+    /// Veriyi en uygun kodlamayı kullanarak bitlere ekler.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::DataTooLong)` on overflow.
+    /// Taşma durumunda `Err(QrError::DataTooLong)` döndürür.
     pub fn push_optimal_data(&mut self, data: &[u8]) -> QrResult<()> {
         let segments = Parser::new(data).optimize(self.version);
         self.push_segments(data, segments)
@@ -1040,9 +1042,10 @@ mod encode_tests {
         assert_eq!(res, Err(QrError::DataTooLong));
     }
 
-    /// The parser assigns a mode to every byte sequence, so the per-mode
-    /// encoders must accept everything it hands them. Any `InvalidCharacter`
-    /// here means the two disagree about which bytes a mode can represent.
+    /// Ayrıştırıcı her bayt dizisine bir mod atar, dolayısıyla mod başına
+    /// kodlayıcılar kendilerine verilen her şeyi kabul etmelidir. Buradaki bir
+    /// `InvalidCharacter`, ikisinin bir modun hangi baytları temsil edebileceği
+    /// konusunda anlaşamadığı anlamına gelir.
     #[test]
     fn test_optimal_data_accepts_every_byte_sequence() {
         use crate::bits::Bits;
@@ -1063,19 +1066,19 @@ mod encode_tests {
 //------------------------------------------------------------------------------
 //{{{ Auto version minimization
 
-/// Automatically determines the minimum version to store the data, and encode
-/// the result.
+/// Veriyi saklamak için gereken en küçük sürümü otomatik olarak belirler ve
+/// sonucu kodlar.
 ///
-/// This method will not consider any Micro QR code versions.
+/// Bu metot hiçbir Micro QR kodu sürümünü dikkate almaz.
 ///
 /// # Errors
 ///
-/// Returns `Err(QrError::DataTooLong)` if the data is too long to fit even the
-/// highest QR code version.
+/// Veri en yüksek QR kodu sürümüne bile sığmayacak kadar uzunsa
+/// `Err(QrError::DataTooLong)` döndürür.
 pub fn encode_auto(data: &[u8], ec_level: EcLevel) -> QrResult<Bits> {
     let segments = Parser::new(data).collect::<Vec<Segment>>();
-    // The boundaries of the three character-count-bit groups of ISO/IEC
-    // 18004:2006 Table 3, largest symbol of each group.
+    // ISO/IEC 18004:2006 Tablo 3'teki üç karakter sayısı biti grubunun sınırları;
+    // her grubun en büyük sembolü.
     for version in [Version::normal(9)?, Version::normal(26)?, Version::normal(40)?] {
         let opt_segments = Optimizer::new(segments.iter().copied(), version).collect::<Vec<_>>();
         let total_len = total_encoded_len(&opt_segments, version);
@@ -1092,16 +1095,16 @@ pub fn encode_auto(data: &[u8], ec_level: EcLevel) -> QrResult<Bits> {
     Err(QrError::DataTooLong)
 }
 
-/// Finds the smallest version (QR code only) that can store N bits of data
-/// in the given error correction level.
+/// Verilen hata düzeltme seviyesinde N bitlik veriyi saklayabilen en küçük
+/// sürümü (yalnızca QR kodu) bulur.
 ///
 /// # Errors
 ///
-/// Returns `Err(QrError::InvalidVersion)` if the search leaves the 1..=40
-/// range, which the binary search below makes unreachable.
+/// Arama 1..=40 aralığından çıkarsa `Err(QrError::InvalidVersion)` döndürür;
+/// aşağıdaki ikili arama bunu erişilemez kılar.
 fn find_min_version(length: usize, ec_level: EcLevel) -> QrResult<Version> {
-    /// Data capacity of the version at `index`, or 0 past the end of the table
-    /// so the search walks left rather than aborting.
+    /// `index`'teki sürümün veri kapasitesi; tablonun sonunu aşarsa arama abort
+    /// etmek yerine sola yürüsün diye 0.
     fn capacity(index: usize, ec_level: EcLevel) -> usize {
         DATA_LENGTHS.get(index).and_then(|row| row.get(ec_level as usize)).copied().unwrap_or(0)
     }
@@ -1111,16 +1114,16 @@ fn find_min_version(length: usize, ec_level: EcLevel) -> QrResult<Version> {
     while size > 1 {
         let half = size / 2;
         let mid = base + half;
-        // mid is always in [0, size).
-        // mid >= 0: by definition
+        // mid her zaman [0, size) aralığındadır.
+        // mid >= 0: tanım gereği
         // mid < size: mid = size / 2 + size / 4 + size / 8 ...
         base = if capacity(mid, ec_level) > length { base } else { mid };
         size -= half;
     }
-    // base is always in [0, mid) because base <= mid.
+    // base <= mid olduğundan base her zaman [0, mid) aralığındadır.
     base = if capacity(base, ec_level) >= length { base } else { base + 1 };
-    // `base` is confined to 0..40 by the binary search above, so the version
-    // number is always in 1..=40 and this constructor always succeeds.
+    // `base`, yukarıdaki ikili arama tarafından 0..40 aralığına hapsedilir; yani
+    // sürüm numarası her zaman 1..=40'tadır ve bu kurucu her zaman başarılı olur.
     Version::normal((base + 1).as_i16())
 }
 

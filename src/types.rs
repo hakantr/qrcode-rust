@@ -1,5 +1,4 @@
-//! The `types` module contains types associated with the functional elements of
-//! a QR code.
+//! `types` modülü bir QR kodunun işlevsel öğeleriyle ilişkili tipleri içerir.
 
 use crate::cast::As;
 use core::cmp::{Ordering, PartialOrd};
@@ -10,76 +9,76 @@ use core::ops::Not;
 //------------------------------------------------------------------------------
 //{{{ QrResult
 
-/// `QrError` encodes the error encountered when generating a QR code.
+/// `QrError` bir QR kodu üretilirken karşılaşılan hatayı kodlar.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum QrError {
-    /// The data is too long to encode into a QR code for the given version.
+    /// Veri, verilen sürüm için bir QR koduna sığmayacak kadar uzun.
     DataTooLong,
 
-    /// The provided version / error correction level combination is invalid.
+    /// Verilen sürüm / hata düzeltme seviyesi bileşimi geçersiz.
     InvalidVersion,
 
-    /// Some characters in the data cannot be supported by the provided QR code
-    /// version.
+    /// Verideki bazı karakterler verilen QR kodu sürümü tarafından
+    /// desteklenmiyor.
     UnsupportedCharacterSet,
 
-    /// The provided ECI designator is invalid. A valid designator should be
-    /// between 0 and 999999.
+    /// Verilen ECI tanımlayıcısı geçersiz. Geçerli bir tanımlayıcı 0 ile 999999
+    /// arasında olmalıdır.
     InvalidEciDesignator,
 
-    /// A character not belonging to the character set is found.
+    /// Karakter kümesine ait olmayan bir karakter bulundu.
     InvalidCharacter,
 
-    /// The mask pattern is not supported by the QR code version. Micro QR codes
-    /// only allow 4 of the 8 patterns.
+    /// Maske deseni bu QR kodu sürümü tarafından desteklenmiyor. Micro QR
+    /// kodları 8 desenden yalnızca 4'üne izin verir.
     InvalidMaskPattern,
 
-    /// A coordinate lies outside of the QR code symbol.
+    /// Bir koordinat QR kodu sembolünün dışında kalıyor.
     CoordinateOutOfRange,
 
-    /// The requested image is too large to be represented.
+    /// İstenen görüntü temsil edilemeyecek kadar büyük.
     ImageTooLarge,
 }
 
 impl Display for QrError {
     fn fmt(&self, fmt: &mut Formatter) -> Result<(), Error> {
         let msg = match *self {
-            Self::DataTooLong => "data too long",
-            Self::InvalidVersion => "invalid version",
-            Self::UnsupportedCharacterSet => "unsupported character set",
-            Self::InvalidEciDesignator => "invalid ECI designator",
-            Self::InvalidCharacter => "invalid character",
-            Self::InvalidMaskPattern => "invalid mask pattern for this version",
-            Self::CoordinateOutOfRange => "coordinate out of range",
-            Self::ImageTooLarge => "image too large",
+            Self::DataTooLong => "veri çok uzun",
+            Self::InvalidVersion => "geçersiz sürüm",
+            Self::UnsupportedCharacterSet => "desteklenmeyen karakter kümesi",
+            Self::InvalidEciDesignator => "geçersiz ECI tanımlayıcısı",
+            Self::InvalidCharacter => "geçersiz karakter",
+            Self::InvalidMaskPattern => "bu sürüm için geçersiz maske deseni",
+            Self::CoordinateOutOfRange => "koordinat aralık dışı",
+            Self::ImageTooLarge => "görüntü çok büyük",
         };
         fmt.write_str(msg)
     }
 }
 
-// `core::error::Error` was stabilized in Rust 1.81 and `std::error::Error` is a
-// re-export of it, so this single impl covers both `std` and `no_std` builds.
+// `core::error::Error` Rust 1.81'de kararlı hale geldi ve `std::error::Error`
+// onun yeniden dışa aktarımı; bu tek impl hem `std` hem `no_std` derlemelerini kapsar.
 impl core::error::Error for QrError {}
 
-/// `QrResult` is a convenient alias for a QR code generation result.
+/// `QrResult`, bir QR kodu üretim sonucu için kullanışlı bir takma addır.
 pub type QrResult<T> = Result<T, QrError>;
 
 //}}}
 //------------------------------------------------------------------------------
 //{{{ Color
 
-/// The color of a module.
+/// Bir modülün rengi.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Color {
-    /// The module is light colored.
+    /// Modül açık renkli.
     Light,
-    /// The module is dark colored.
+    /// Modül koyu renkli.
     Dark,
 }
 
 impl Color {
-    /// Selects a value according to color of the module. Equivalent to
-    /// `if self != Color::Light { dark } else { light }`.
+    /// Modülün rengine göre bir değer seçer.
+    /// `if self != Color::Light { dark } else { light }` ile eşdeğerdir.
     ///
     /// # Examples
     ///
@@ -110,20 +109,20 @@ impl Not for Color {
 //------------------------------------------------------------------------------
 //{{{ Error correction level
 
-/// The error correction level. It allows the original information be recovered
-/// even if parts of the code is damaged.
+/// Hata düzeltme seviyesi. Kodun bir kısmı hasar görse bile özgün bilginin
+/// geri kazanılmasını sağlar.
 #[derive(Debug, PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
 pub enum EcLevel {
-    /// Low error correction. Allows up to 7% of wrong blocks.
+    /// Düşük hata düzeltme. Blokların en fazla %7'sinin hatalı olmasına izin verir.
     L = 0,
 
-    /// Medium error correction (default). Allows up to 15% of wrong blocks.
+    /// Orta hata düzeltme (varsayılan). Blokların en fazla %15'ine izin verir.
     M = 1,
 
-    /// "Quartile" error correction. Allows up to 25% of wrong blocks.
+    /// "Quartile" hata düzeltme. Blokların en fazla %25'ine izin verir.
     Q = 2,
 
-    /// High error correction. Allows up to 30% of wrong blocks.
+    /// Yüksek hata düzeltme. Blokların en fazla %30'una izin verir.
     H = 3,
 }
 
@@ -131,35 +130,35 @@ pub enum EcLevel {
 //------------------------------------------------------------------------------
 //{{{ Version
 
-/// The number of entries in the hard-coded per-version tables: 40 QR code
-/// versions followed by 4 Micro QR code versions.
+/// Sürüm başına sabit kodlanmış tablolardaki girdi sayısı: 40 QR kodu sürümü
+/// ve ardından 4 Micro QR kodu sürümü.
 pub const VERSION_COUNT: usize = 44;
 
-/// Which family a [`Version`] belongs to, and its number within that family.
+/// Bir [`Version`]'ın hangi aileye ait olduğu ve o aile içindeki numarası.
 ///
-/// This is the shape a `Version` is matched on internally. It is deliberately
-/// not part of the public API: a `Version` can only be built through
-/// [`Version::normal`] or [`Version::micro`], which is what makes every
-/// per-version table lookup in this crate infallible.
+/// Bir `Version` dahilde bu biçim üzerinden eşleştirilir. Bilinçli olarak
+/// genel API'nin parçası değildir: bir `Version` yalnızca [`Version::normal`]
+/// veya [`Version::micro`] ile kurulabilir; bu crate'teki her sürüm tablosu
+/// aramasını hatasız yapan da budur.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub(crate) enum VersionKind {
-    /// A normal QR code version, between 1 and 40.
+    /// 1 ile 40 arasında normal bir QR kodu sürümü.
     Normal(i16),
 
-    /// A Micro QR code version, between 1 and 4.
+    /// 1 ile 4 arasında bir Micro QR kodu sürümü.
     Micro(i16),
 }
 
-/// In QR code terminology, `Version` means the size of the generated image.
-/// Larger version means the size of code is larger, and therefore can carry
-/// more information.
+/// QR kodu terminolojisinde `Version`, üretilen görüntünün boyutu anlamına
+/// gelir. Daha büyük sürüm, kodun daha büyük olması ve dolayısıyla daha çok
+/// bilgi taşıyabilmesi demektir.
 ///
-/// The smallest version is `Version::normal(1)` of size 21×21, and the largest
-/// is `Version::normal(40)` of size 177×177.
+/// En küçük sürüm 21×21 boyutundaki `Version::normal(1)`, en büyüğü ise
+/// 177×177 boyutundaki `Version::normal(40)`'tır.
 ///
-/// A `Version` is validated on construction, so it can never name a symbol the
-/// standard does not define. Every operation taking a `Version` is therefore
-/// total: none of them can panic on the version's account.
+/// Bir `Version` kurulurken doğrulanır, bu yüzden standardın tanımlamadığı
+/// bir sembolü asla adlandıramaz. Dolayısıyla `Version` alan her işlem
+/// totaldir: hiçbiri sürüm yüzünden panikleyemez.
 ///
 /// ```
 /// use qrcode::Version;
@@ -177,12 +176,12 @@ pub struct Version {
 }
 
 impl Version {
-    /// Constructs a normal QR code version.
+    /// Normal bir QR kodu sürümü kurar.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::InvalidVersion)` unless `number` is between 1 and
-    /// 40 inclusive.
+    /// `number` 1 ile 40 arasında (dahil) değilse
+    /// `Err(QrError::InvalidVersion)` döndürür.
     pub const fn normal(number: i16) -> QrResult<Self> {
         match number {
             1..=40 => Ok(Self { kind: VersionKind::Normal(number) }),
@@ -190,12 +189,12 @@ impl Version {
         }
     }
 
-    /// Constructs a Micro QR code version.
+    /// Bir Micro QR kodu sürümü kurar.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::InvalidVersion)` unless `number` is between 1 and
-    /// 4 inclusive.
+    /// `number` 1 ile 4 arasında (dahil) değilse
+    /// `Err(QrError::InvalidVersion)` döndürür.
     pub const fn micro(number: i16) -> QrResult<Self> {
         match number {
             1..=4 => Ok(Self { kind: VersionKind::Micro(number) }),
@@ -203,8 +202,8 @@ impl Version {
         }
     }
 
-    /// The version number within its family, i.e. 1 to 40 for a normal QR code
-    /// and 1 to 4 for a Micro QR code.
+    /// Kendi ailesi içindeki sürüm numarası; yani normal bir QR kodu için 1-40,
+    /// bir Micro QR kodu için 1-4.
     pub const fn number(self) -> i16 {
         match self.kind {
             VersionKind::Normal(v) | VersionKind::Micro(v) => v,
@@ -215,11 +214,11 @@ impl Version {
         self.kind
     }
 
-    /// Get the number of "modules" on each size of the QR code, i.e. the width
-    /// and height of the code.
+    /// QR kodunun her kenarındaki "modül" sayısını, yani kodun genişlik ve
+    /// yüksekliğini verir.
     ///
-    /// The result is between 11 and 177, so `width * width` always fits in an
-    /// `i16`.
+    /// Sonuç 11 ile 177 arasındadır, bu yüzden `width * width` her zaman bir
+    /// `i16`'ya sığar.
     pub const fn width(self) -> i16 {
         match self.kind {
             VersionKind::Normal(v) => v * 4 + 17,
@@ -227,37 +226,37 @@ impl Version {
         }
     }
 
-    /// The index of this version in a per-version table, i.e. 0 to 39 for a
-    /// normal QR code and 40 to 43 for a Micro QR code.
-    #[expect(clippy::cast_sign_loss, reason = "the constructors confine both numbers to 1..=40")]
+    /// Bu sürümün sürüm tablosundaki indeksi; yani normal bir QR kodu için 0-39,
+    /// bir Micro QR kodu için 40-43.
+    #[expect(clippy::cast_sign_loss, reason = "kurucular her iki sayıyı da 1..=40 aralığına hapseder")]
     pub(crate) const fn table_index(self) -> usize {
-        // Both arms are in 0..VERSION_COUNT by construction.
+        // Yapı gereği her iki kol da 0..VERSION_COUNT aralığındadır.
         match self.kind {
             VersionKind::Normal(v) => (v as usize) - 1,
             VersionKind::Micro(v) => (v as usize) + 39,
         }
     }
 
-    /// Obtains an object from a hard-coded table.
+    /// Sabit kodlanmış bir tablodan bir nesne alır.
     ///
-    /// The first 40 entries correspond to QR code versions 1 to 40, and the
-    /// last 4 to Micro QR code versions 1 to 4. The inner array represents the
-    /// content in each error correction level, in the order [L, M, Q, H].
+    /// İlk 40 girdi 1'den 40'a QR kodu sürümlerine, son 4 girdi 1'den 4'e Micro
+    /// QR kodu sürümlerine karşılık gelir. İç dizi her hata düzeltme seviyesindeki
+    /// içeriği [L, M, Q, H] sırasıyla temsil eder.
     ///
-    /// The table length is fixed by the signature, and a `Version` is always in
-    /// range, so the lookup itself cannot fail.
+    /// Tablo uzunluğu imza ile sabitlenmiştir ve bir `Version` her zaman aralık
+    /// içindedir, dolayısıyla aramanın kendisi başarısız olamaz.
     ///
     /// # Errors
     ///
-    /// If the entry compares equal to the default value of `T`, this method
-    /// returns `Err(QrError::InvalidVersion)`. This is how the Micro QR code
-    /// versions reject the error correction levels they do not support.
+    /// Girdi `T`'nin varsayılan değerine eşitse bu metot
+    /// `Err(QrError::InvalidVersion)` döndürür. Micro QR kodu sürümleri
+    /// desteklemedikleri hata düzeltme seviyelerini böyle reddeder.
     pub fn fetch<T>(self, ec_level: EcLevel, table: &[[T; 4]; VERSION_COUNT]) -> QrResult<T>
     where
         T: PartialEq + Default + Copy,
     {
-        // `table_index()` is 0..VERSION_COUNT and `ec_level` is 0..4 by
-        // construction, so both lookups always hit.
+        // Yapı gereği `table_index()` 0..VERSION_COUNT ve `ec_level` 0..4
+        // aralığındadır, bu yüzden her iki arama da her zaman isabet eder.
         let obj = table
             .get(self.table_index())
             .and_then(|row| row.get(ec_level as usize))
@@ -266,17 +265,17 @@ impl Version {
         if obj == T::default() { Err(QrError::InvalidVersion) } else { Ok(obj) }
     }
 
-    /// The number of bits needed to encode the mode indicator.
-    #[expect(clippy::cast_sign_loss, reason = "Version::micro confines the number to 1..=4")]
+    /// Mod göstergesini kodlamak için gereken bit sayısı.
+    #[expect(clippy::cast_sign_loss, reason = "Version::micro sayıyı 1..=4 aralığına hapseder")]
     pub const fn mode_bits_count(self) -> usize {
         match self.kind {
-            // Micro versions are 1..=4, so this never underflows.
+            // Micro sürümler 1..=4 aralığındadır, bu yüzden burada asla taşma olmaz.
             VersionKind::Micro(a) => (a as usize) - 1,
             VersionKind::Normal(_) => 4,
         }
     }
 
-    /// Checks whether is version refers to a Micro QR code.
+    /// Bu sürümün bir Micro QR koduna işaret edip etmediğini kontrol eder.
     pub const fn is_micro(self) -> bool {
         matches!(self.kind, VersionKind::Micro(_))
     }
@@ -286,25 +285,25 @@ impl Version {
 //------------------------------------------------------------------------------
 //{{{ Mode indicator
 
-/// The mode indicator, which specifies the character set of the encoded data.
+/// Kodlanan verinin karakter kümesini belirten mod göstergesi.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Mode {
-    /// The data contains only characters 0 to 9.
+    /// Veri yalnızca 0-9 karakterlerini içerir.
     Numeric,
 
-    /// The data contains only uppercase letters (A–Z), numbers (0–9) and a few
-    /// punctuations marks (space, `$`, `%`, `*`, `+`, `-`, `.`, `/`, `:`).
+    /// Veri yalnızca büyük harfleri (A–Z), rakamları (0–9) ve birkaç noktalama
+    /// işaretini (boşluk, `$`, `%`, `*`, `+`, `-`, `.`, `/`, `:`) içerir.
     Alphanumeric,
 
-    /// The data contains arbitrary binary data.
+    /// Veri rastgele ikili veri içerir.
     Byte,
 
-    /// The data contains Shift-JIS-encoded double-byte text.
+    /// Veri Shift-JIS kodlanmış çift baytlı metin içerir.
     Kanji,
 }
 
 impl Mode {
-    /// Computes the number of bits needed to encode the data length.
+    /// Veri uzunluğunu kodlamak için gereken bit sayısını hesaplar.
     ///
     /// ```
     /// use qrcode::types::{Mode, Version};
@@ -312,8 +311,8 @@ impl Mode {
     /// assert_eq!(Mode::Numeric.length_bits_count(Version::normal(1).unwrap()), 10);
     /// ```
     ///
-    /// This method will return `Err(QrError::UnsupportedCharacterSet)` if the
-    /// mode is not supported in the given version.
+    /// Mod verilen sürümde desteklenmiyorsa bu metot
+    /// `Err(QrError::UnsupportedCharacterSet)` döndürür.
     pub fn length_bits_count(self, version: Version) -> usize {
         match version.kind() {
             VersionKind::Micro(a) => {
@@ -344,7 +343,7 @@ impl Mode {
         }
     }
 
-    /// Computes the number of bits needed to some data of a given raw length.
+    /// Verilen ham uzunluktaki bir veriyi kodlamak için gereken bit sayısını hesaplar.
     ///
     /// ```
     /// use qrcode::types::Mode;
@@ -352,8 +351,8 @@ impl Mode {
     /// assert_eq!(Mode::Numeric.data_bits_count(7), 24);
     /// ```
     ///
-    /// Note that in Kanji mode, the `raw_data_len` is the number of Kanjis,
-    /// i.e. half the total size of bytes.
+    /// Kanji modunda `raw_data_len`'in Kanji sayısı olduğuna, yani toplam bayt
+    /// boyutunun yarısı olduğuna dikkat edin.
     pub const fn data_bits_count(self, raw_data_len: usize) -> usize {
         match self {
             Self::Numeric => (raw_data_len * 10).div_ceil(3),
@@ -363,7 +362,7 @@ impl Mode {
         }
     }
 
-    /// Find the lowest common mode which both modes are compatible with.
+    /// Her iki modun da uyumlu olduğu en düşük ortak modu bulur.
     ///
     /// ```
     /// use qrcode::types::Mode;
@@ -385,8 +384,8 @@ impl Mode {
 }
 
 impl PartialOrd for Mode {
-    /// Defines a partial ordering between modes. If `a <= b`, then `b` contains
-    /// a superset of all characters supported by `a`.
+    /// Modlar arasında kısmi bir sıralama tanımlar. `a <= b` ise `b`, `a`'nın
+    /// desteklediği tüm karakterlerin bir üst kümesini içerir.
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (*self, *other) {
             (a, b) if a == b => Some(Ordering::Equal),
@@ -402,7 +401,7 @@ mod mode_tests {
     use crate::types::Mode::{Alphanumeric, Byte, Kanji, Numeric};
 
     #[test]
-    #[expect(clippy::neg_cmp_op_on_partial_ord, reason = "asserting that the two modes are incomparable")]
+    #[expect(clippy::neg_cmp_op_on_partial_ord, reason = "iki modun kıyaslanamaz olduğunu doğruluyor")]
     fn test_mode_order() {
         assert!(Numeric < Alphanumeric);
         assert!(Byte > Kanji);

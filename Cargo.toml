@@ -32,6 +32,7 @@ expect_used = "deny"
 panic = "deny"
 unreachable = "deny"
 todo = "deny"
+unimplemented = "deny"
 exit = "deny"
 must_use_candidate = "allow"
 

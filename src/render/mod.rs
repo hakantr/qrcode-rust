@@ -1,4 +1,4 @@
-//! Render a QR code into image.
+//! Bir QR kodunu görüntüye çizer.
 
 use crate::types::{Color, QrError, QrResult};
 use core::cmp::max;
@@ -10,53 +10,53 @@ pub mod string;
 pub mod svg;
 pub mod unicode;
 
-/// The largest image, in pixels, that [`Renderer::try_build`] will attempt to
-/// allocate. Anything above this is reported as `QrError::ImageTooLarge`
-/// instead of being handed to the allocator.
+/// [`Renderer::try_build`]'in ayırmayı deneyeceği en büyük görüntü, piksel
+/// cinsinden. Bunun üzerindeki her şey ayırıcıya verilmek yerine
+/// `QrError::ImageTooLarge` olarak bildirilir.
 ///
-/// The ceiling is 2<sup>32</sup> pixels: a version 40 symbol including its
-/// quiet zone is 185 modules across, so this still allows well over 300 pixels
-/// per module — far beyond any practical rendering — while keeping a hostile
-/// `module_dimensions` request from aborting the process.
+/// Tavan 2<sup>32</sup> pikseldir: sessiz bölgesiyle birlikte bir sürüm 40
+/// sembolü 185 modül genişliğindedir, yani bu hâlâ modül başına 300 pikselin
+/// çok üzerine — pratikte hiçbir çizimin gerektirmeyeceği kadarına — izin
+/// verirken düşmanca bir `module_dimensions` isteğinin süreci abort etmesini
+/// engeller.
 pub const MAX_IMAGE_PIXELS: u64 = 1 << 32;
 
 //------------------------------------------------------------------------------
 //{{{ Pixel trait
 
-/// Abstraction of an image pixel.
+/// Bir görüntü pikselinin soyutlaması.
 pub trait Pixel: Copy + Sized {
-    /// Type of the finalized image.
+    /// Tamamlanmış görüntünün tipi.
     type Image: Sized + 'static;
 
-    /// The type that stores an intermediate buffer before finalizing to a
-    /// concrete image
+    /// Somut bir görüntüye dönüştürülmeden önce ara tamponu saklayan tip.
     type Canvas: Canvas<Pixel = Self, Image = Self::Image>;
 
-    /// Obtains the default module size. The result must be at least 1×1.
+    /// Varsayılan modül boyutunu verir. Sonuç en az 1×1 olmalıdır.
     fn default_unit_size() -> (u32, u32) {
         (8, 8)
     }
 
-    /// Obtains the default pixel color when a module is dark or light.
+    /// Modül koyu ya da açık olduğunda varsayılan piksel rengini verir.
     fn default_color(color: Color) -> Self;
 }
 
-/// Rendering canvas of a QR code image.
+/// Bir QR kodu görüntüsünün çizim tuvali.
 pub trait Canvas: Sized {
-    /// Type of an image pixel.
+    /// Bir görüntü pikselinin tipi.
     type Pixel: Sized;
 
-    /// Type of the finalized image.
+    /// Tamamlanmış görüntünün tipi.
     type Image: Sized;
 
-    /// Constructs a new canvas of the given dimensions.
+    /// Verilen boyutlarda yeni bir tuval kurar.
     fn new(width: u32, height: u32, dark_pixel: Self::Pixel, light_pixel: Self::Pixel) -> Self;
 
-    /// Draws a single dark pixel at the (x, y) coordinate.
+    /// (x, y) koordinatına tek bir koyu piksel çizer.
     fn draw_dark_pixel(&mut self, x: u32, y: u32);
 
-    /// Draws a dark rectangle with dimensions `width`×`height` at the (`left`,
-    /// `top`) coordinate.
+    /// (`left`, `top`) koordinatına `width`×`height` boyutlarında koyu bir
+    /// dikdörtgen çizer.
     fn draw_dark_rect(&mut self, left: u32, top: u32, width: u32, height: u32) {
         for y in top..(top + height) {
             for x in left..(left + width) {
@@ -65,7 +65,7 @@ pub trait Canvas: Sized {
         }
     }
 
-    /// Finalize the canvas to a real image.
+    /// Tuvali gerçek bir görüntüye dönüştürür.
     fn into_image(self) -> Self::Image;
 }
 
@@ -73,11 +73,11 @@ pub trait Canvas: Sized {
 //------------------------------------------------------------------------------
 //{{{ Renderer
 
-/// A QR code renderer. This is a builder type which converts a bool-vector into
-/// an image.
+/// Bir QR kodu çizici. Bir bool vektörünü görüntüye dönüştüren bir kurucu
+/// (builder) tiptir.
 pub struct Renderer<'a, P: Pixel> {
     content: &'a [Color],
-    modules_count: u32, // <- we call it `modules_count` here to avoid ambiguity of `width`.
+    modules_count: u32, // <- `width` ile karışmasın diye burada `modules_count` diyoruz.
     quiet_zone: u32,
     module_size: (u32, u32),
 
@@ -87,29 +87,28 @@ pub struct Renderer<'a, P: Pixel> {
 }
 
 impl<'a, P: Pixel> Renderer<'a, P> {
-    /// Creates a new renderer.
+    /// Yeni bir çizici oluşturur.
     ///
     /// # Panics
     ///
-    /// Panics if the length of `content` is not exactly
-    /// `modules_count * modules_count`, or if `modules_count` does not fit in a
-    /// `u32`. Use [`Renderer::try_new`] for the checked form.
+    /// `content`'in uzunluğu tam olarak `modules_count * modules_count` değilse
+    /// ya da `modules_count` bir `u32`'ye sığmıyorsa panikler. Kontrollü biçim
+    /// için [`Renderer::try_new`] kullanın.
     pub fn new(content: &'a [Color], modules_count: usize, quiet_zone: u32) -> Self {
-        #[expect(clippy::expect_used, reason = "documented panic; try_new is the checked form")]
-        Self::try_new(content, modules_count, quiet_zone).expect("content length does not match modules_count")
+        #[expect(clippy::expect_used, reason = "belgelenmiş panik; kontrollü biçim try_new")]
+        Self::try_new(content, modules_count, quiet_zone).expect("content uzunluğu modules_count ile uyuşmuyor")
     }
 
-    /// Creates a new renderer, reporting a mismatched `content` instead of
-    /// panicking.
+    /// Yeni bir çizici oluşturur; uyuşmayan `content`'i paniklemek yerine bildirir.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::ImageTooLarge)` if the length of `content` is not
-    /// exactly `modules_count * modules_count`, or if `modules_count` does not
-    /// fit in a `u32`.
+    /// `content`'in uzunluğu tam olarak `modules_count * modules_count` değilse
+    /// ya da `modules_count` bir `u32`'ye sığmıyorsa
+    /// `Err(QrError::ImageTooLarge)` döndürür.
     ///
-    /// The multiplication is checked, so an enormous `modules_count` reports an
-    /// error rather than wrapping into a length that happens to match.
+    /// Çarpma kontrollüdür; yani devasa bir `modules_count`, tesadüfen uyan bir
+    /// uzunluğa sarmalanmak yerine hata bildirir.
     pub fn try_new(content: &'a [Color], modules_count: usize, quiet_zone: u32) -> QrResult<Self> {
         let area = modules_count.checked_mul(modules_count).ok_or(QrError::ImageTooLarge)?;
         if area != content.len() {
@@ -127,86 +126,84 @@ impl<'a, P: Pixel> Renderer<'a, P> {
         })
     }
 
-    /// Sets color of a dark module. Default is opaque black.
+    /// Koyu bir modülün rengini ayarlar. Varsayılan opak siyahtır.
     pub fn dark_color(&mut self, color: P) -> &mut Self {
         self.dark_color = color;
         self
     }
 
-    /// Sets color of a light module. Default is opaque white.
+    /// Açık bir modülün rengini ayarlar. Varsayılan opak beyazdır.
     pub fn light_color(&mut self, color: P) -> &mut Self {
         self.light_color = color;
         self
     }
 
-    /// Whether to include the quiet zone in the generated image.
+    /// Üretilen görüntüye sessiz bölgenin dahil edilip edilmeyeceği.
     pub fn quiet_zone(&mut self, has_quiet_zone: bool) -> &mut Self {
         self.has_quiet_zone = has_quiet_zone;
         self
     }
 
-    /// Sets the size of each module in pixels. Default is 8px.
+    /// Her modülün piksel cinsinden boyutunu ayarlar. Varsayılan 8px.
     #[deprecated(since = "0.4.0", note = "use `.module_dimensions(width, width)` instead")]
     pub fn module_size(&mut self, width: u32) -> &mut Self {
         self.module_dimensions(width, width)
     }
 
-    /// Sets the size of each module in pixels. Default is 8×8.
+    /// Her modülün piksel cinsinden boyutunu ayarlar. Varsayılan 8×8.
     pub fn module_dimensions(&mut self, width: u32, height: u32) -> &mut Self {
         self.module_size = (max(width, 1), max(height, 1));
         self
     }
 
-    /// Sets the minimum total image width (and thus height) in pixels,
-    /// including the quiet zone if applicable. The renderer will try to find
-    /// the dimension as small as possible, such that each module in the QR code
-    /// has uniform size (no distortion).
+    /// Geçerliyse sessiz bölge dahil, piksel cinsinden en küçük toplam görüntü
+    /// genişliğini (ve dolayısıyla yüksekliğini) ayarlar. Çizici, QR kodundaki
+    /// her modül tek biçim boyutta olacak (bozulma olmayacak) şekilde boyutu
+    /// olabildiğince küçük tutmaya çalışır.
     ///
-    /// For instance, a version 1 QR code has 19 modules across including the
-    /// quiet zone. If we request an image of width ≥200px, we get that each
-    /// module's size should be 11px, so the actual image size will be 209px.
+    /// Örneğin bir sürüm 1 QR kodu sessiz bölgesiyle 19 modül genişliğindedir.
+    /// ≥200px genişlikte bir görüntü istersek her modülün boyutu 11px olur,
+    /// yani gerçek görüntü boyutu 209px olur.
     #[deprecated(since = "0.4.0", note = "use `.min_dimensions(width, width)` instead")]
     pub fn min_width(&mut self, width: u32) -> &mut Self {
         self.min_dimensions(width, width)
     }
 
-    /// Sets the minimum total image size in pixels, including the quiet zone if
-    /// applicable. The renderer will try to find the dimension as small as
-    /// possible, such that each module in the QR code has uniform size (no
-    /// distortion).
+    /// Geçerliyse sessiz bölge dahil, piksel cinsinden en küçük toplam görüntü
+    /// boyutunu ayarlar. Çizici, QR kodundaki her modül tek biçim boyutta olacak
+    /// (bozulma olmayacak) şekilde boyutu olabildiğince küçük tutmaya çalışır.
     ///
-    /// For instance, a version 1 QR code has 19 modules across including the
-    /// quiet zone. If we request an image of size ≥200×200, we get that each
-    /// module's size should be 11×11, so the actual image size will be 209×209.
+    /// Örneğin bir sürüm 1 QR kodu sessiz bölgesiyle 19 modül genişliğindedir.
+    /// ≥200×200 boyutunda bir görüntü istersek her modülün boyutu 11×11 olur,
+    /// yani gerçek görüntü boyutu 209×209 olur.
     pub fn min_dimensions(&mut self, width: u32, height: u32) -> &mut Self {
         let width_in_modules = self.width_in_modules();
-        // `div_ceil` rather than `(a + b - 1) / b`, which overflows for a
-        // requested size close to `u32::MAX`.
+        // İstenen boyut `u32::MAX`'a yakınken taşan `(a + b - 1) / b` yerine
+        // `div_ceil`.
         let unit_width = width.div_ceil(width_in_modules);
         let unit_height = height.div_ceil(width_in_modules);
         self.module_dimensions(unit_width, unit_height)
     }
 
-    /// The number of modules across the finished image, quiet zone included.
+    /// Sessiz bölge dahil, tamamlanmış görüntüdeki modül sayısı.
     ///
-    /// Clamped to at least 1: an empty QR code has no modules, and dividing the
-    /// requested image size by zero would otherwise abort.
+    /// En az 1'e kırpılır: boş bir QR kodunun modülü yoktur ve istenen görüntü
+    /// boyutunu sıfıra bölmek aksi hâlde abort'a yol açardı.
     fn width_in_modules(&self) -> u32 {
         let quiet_zone = if self.has_quiet_zone { 2 } else { 0 } * self.quiet_zone;
         self.modules_count.saturating_add(quiet_zone).max(1)
     }
 
-    /// Sets the maximum total image size in pixels, including the quiet zone if
-    /// applicable. The renderer will try to find the dimension as large as
-    /// possible, such that each module in the QR code has uniform size (no
-    /// distortion).
+    /// Geçerliyse sessiz bölge dahil, piksel cinsinden en büyük toplam görüntü
+    /// boyutunu ayarlar. Çizici, QR kodundaki her modül tek biçim boyutta olacak
+    /// (bozulma olmayacak) şekilde boyutu olabildiğince büyük tutmaya çalışır.
     ///
-    /// For instance, a version 1 QR code has 19 modules across including the
-    /// quiet zone. If we request an image of size ≤200×200, we get that each
-    /// module's size should be 10×10, so the actual image size will be 190×190.
+    /// Örneğin bir sürüm 1 QR kodu sessiz bölgesiyle 19 modül genişliğindedir.
+    /// ≤200×200 boyutunda bir görüntü istersek her modülün boyutu 10×10 olur,
+    /// yani gerçek görüntü boyutu 190×190 olur.
     ///
-    /// The module size is at least 1×1, so if the restriction is too small, the
-    /// final image *can* be larger than the input.
+    /// Modül boyutu en az 1×1'dir; yani kısıt fazla küçükse nihai görüntü
+    /// girdiden *büyük* olabilir.
     pub fn max_dimensions(&mut self, width: u32, height: u32) -> &mut Self {
         let width_in_modules = self.width_in_modules();
         let unit_width = width / width_in_modules;
@@ -214,32 +211,32 @@ impl<'a, P: Pixel> Renderer<'a, P> {
         self.module_dimensions(unit_width, unit_height)
     }
 
-    /// Renders the QR code into an image.
+    /// QR kodunu bir görüntüye çizer.
     #[deprecated(since = "0.4.0", note = "renamed to `.build()` to de-emphasize the image connection")]
     pub fn to_image(&self) -> P::Image {
         self.build()
     }
 
-    /// Renders the QR code into an image.
+    /// QR kodunu bir görüntüye çizer.
     ///
     /// # Panics
     ///
-    /// Panics if the resulting image dimensions overflow a `u32`. Use
-    /// [`Renderer::try_build`] for the checked form.
+    /// Ortaya çıkan görüntü boyutları bir `u32`'yi taşırırsa panikler.
+    /// Kontrollü biçim için [`Renderer::try_build`] kullanın.
     pub fn build(&self) -> P::Image {
-        #[expect(clippy::expect_used, reason = "documented panic; try_build is the checked form")]
-        self.try_build().expect("image dimensions overflow")
+        #[expect(clippy::expect_used, reason = "belgelenmiş panik; kontrollü biçim try_build")]
+        self.try_build().expect("görüntü boyutları taşıyor")
     }
 
-    /// Renders the QR code into an image, reporting oversized output instead of
-    /// panicking.
+    /// QR kodunu bir görüntüye çizer; aşırı büyük çıktıyı paniklemek yerine
+    /// bildirir.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::ImageTooLarge)` if the module count, quiet zone
-    /// and module size multiply out to dimensions beyond `u32`. Without the
-    /// check this wraps in release builds and silently produces an image of the
-    /// wrong size.
+    /// Modül sayısı, sessiz bölge ve modül boyutu çarpıldığında `u32`'yi aşan
+    /// boyutlar veriyorsa `Err(QrError::ImageTooLarge)` döndürür. Bu kontrol
+    /// olmadan release derlemelerinde sarmalanır ve sessizce yanlış boyutta bir
+    /// görüntü üretir.
     pub fn try_build(&self) -> QrResult<P::Image> {
         let w = self.modules_count;
         let qz = if self.has_quiet_zone { self.quiet_zone } else { 0 };
@@ -249,11 +246,11 @@ impl<'a, P: Pixel> Renderer<'a, P> {
         let real_width = width.checked_mul(mw).ok_or(QrError::ImageTooLarge)?;
         let real_height = width.checked_mul(mh).ok_or(QrError::ImageTooLarge)?;
 
-        // The backends allocate `real_width * real_height` elements up front.
-        // Without this check a large enough request reaches `Vec` with a
-        // saturated length and aborts the process on capacity overflow, which a
-        // caller cannot catch. `MAX_IMAGE_PIXELS` is the one place that turns
-        // "too big to allocate" into an ordinary error.
+        // Arka uçlar `real_width * real_height` öğeyi baştan ayırır. Bu kontrol
+        // olmadan yeterince büyük bir istek `Vec`'e doymuş bir uzunlukla ulaşır ve
+        // çağıranın yakalayamayacağı bir kapasite taşmasıyla süreci abort eder.
+        // `MAX_IMAGE_PIXELS`, "ayrılamayacak kadar büyük"ü sıradan bir hataya
+        // çeviren tek yerdir.
         let area = u64::from(real_width) * u64::from(real_height);
         if area > MAX_IMAGE_PIXELS {
             return Err(QrError::ImageTooLarge);

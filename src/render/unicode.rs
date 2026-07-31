@@ -1,4 +1,4 @@
-//! UTF-8 rendering, with 2 pixels per symbol.
+//! Sembol başına 2 piksel ile UTF-8 çizimi.
 
 use crate::render::{Canvas as RenderCanvas, Color, Pixel};
 
@@ -8,12 +8,12 @@ use alloc::vec::Vec;
 
 const CODEPAGE: [&str; 4] = [" ", "\u{2584}", "\u{2580}", "\u{2588}"];
 
-/// An image pixel for UTF-8 rendering.
+/// UTF-8 çizimi için bir görüntü pikseli.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Dense1x2 {
-    /// The pixel is dark colored.
+    /// Piksel koyu renkli.
     Dark,
-    /// The pixel is light colored.
+    /// Piksel açık renkli.
     Light,
 }
 
@@ -36,13 +36,13 @@ impl Dense1x2 {
         }
     }
     fn parse_2_bits(sym: u8) -> &'static str {
-        // `sym` is a 2-bit value built from two `value()` results, so it always
-        // indexes the 4-entry code page.
+        // `sym`, iki `value()` sonucundan kurulan 2 bitlik bir değerdir; bu yüzden
+        // her zaman 4 girdilik kod sayfasını indeksler.
         CODEPAGE.get(usize::from(sym)).copied().unwrap_or(" ")
     }
 }
 
-/// A canvas for UTF-8 rendering with a resolution of 1×2 modules per character.
+/// Karakter başına 1×2 modül çözünürlüğünde UTF-8 çizimi için bir tuval.
 pub struct Canvas1x2 {
     canvas: Vec<u8>,
     width: u32,
@@ -66,15 +66,15 @@ impl RenderCanvas for Canvas1x2 {
 
     fn into_image(self) -> String {
         self.canvas
-            // Chopping array into 1-line sized fragments
+            // Diziyi 1 satırlık parçalara bölüyoruz
             .chunks_exact(self.width as usize)
             .collect::<Vec<&[u8]>>()
-            // And then glueing every 2 lines.
+            // Ve sonra her 2 satırı birleştiriyoruz.
             .chunks(2)
             .map(|rows| {
                 {
-                    // Then zipping those 2 lines together into a single 2-bit number list.
-                    // `chunks(2)` yields one or two rows, never zero.
+                    // Ardından bu 2 satırı tek bir 2 bitlik sayı listesine sıkıştırıyoruz.
+                    // `chunks(2)` bir ya da iki satır verir, asla sıfır değil.
                     match rows {
                         [top_row, bottom_row] => {
                             top_row.iter().zip(*bottom_row).map(|(top, bot)| top * 2 + bot).collect::<Vec<u8>>()
@@ -84,7 +84,7 @@ impl RenderCanvas for Canvas1x2 {
                     }
                 }
                 .into_iter()
-                // Mapping those 2-bit numbers to corresponding pixels.
+                // Bu 2 bitlik sayıları karşılık gelen piksellere eşliyoruz.
                 .map(Dense1x2::parse_2_bits)
                 .collect::<Vec<&str>>()
                 .concat()

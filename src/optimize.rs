@@ -1,4 +1,4 @@
-//! Find the optimal data mode sequence to encode a piece of data.
+//! Bir veri parçasını kodlamak için en uygun veri modu dizisini bulur.
 use crate::types::{Mode, Version};
 use core::slice::Iter;
 
@@ -8,22 +8,22 @@ extern crate test;
 //------------------------------------------------------------------------------
 //{{{ Segment
 
-/// A segment of data committed to an encoding mode.
+/// Bir kodlama moduna bağlanmış veri parçası.
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub struct Segment {
-    /// The encoding mode of the segment of data.
+    /// Veri parçasının kodlama modu.
     pub mode: Mode,
 
-    /// The start index of the segment.
+    /// Parçanın başlangıç indeksi.
     pub begin: usize,
 
-    /// The end index (exclusive) of the segment.
+    /// Parçanın bitiş indeksi (hariç).
     pub end: usize,
 }
 
 impl Segment {
-    /// Compute the number of bits (including the size of the mode indicator and
-    /// length bits) when this segment is encoded.
+    /// Bu parça kodlandığında oluşacak bit sayısını (mod göstergesi ve uzunluk
+    /// bitlerinin boyutu dahil) hesaplar.
     pub fn encoded_len(&self, version: Version) -> usize {
         let byte_size = self.end - self.begin;
         let chars_count = if self.mode == Mode::Kanji { byte_size / 2 } else { byte_size };
@@ -40,7 +40,7 @@ impl Segment {
 //------------------------------------------------------------------------------
 //{{{ Parser
 
-/// This iterator is basically equivalent to
+/// Bu yineleyici temelde şuna eşdeğerdir:
 ///
 /// ```ignore
 /// data.map(|c| ExclCharSet::from_u8(*c))
@@ -48,7 +48,7 @@ impl Segment {
 ///     .enumerate()
 /// ```
 ///
-/// But the type is too hard to write, thus the new type.
+/// Ama tipi yazmak fazla zor, dolayısıyla yeni tip.
 struct EcsIter<I> {
     base: I,
     index: usize,
@@ -77,7 +77,7 @@ impl<'a, I: Iterator<Item = &'a u8>> Iterator for EcsIter<I> {
     }
 }
 
-/// QR code data parser to classify the input into distinct segments.
+/// Girdiyi ayrı parçalara sınıflandıran QR kodu veri ayrıştırıcısı.
 pub struct Parser<'a> {
     ecs_iter: EcsIter<Iter<'a, u8>>,
     state: State,
@@ -86,8 +86,8 @@ pub struct Parser<'a> {
 }
 
 impl Parser<'_> {
-    /// Creates a new iterator which parse the data into segments that only
-    /// contains their exclusive subsets. No optimization is done at this point.
+    /// Veriyi yalnızca kendi ayrık alt kümelerini içeren parçalara ayrıştıran yeni
+    /// bir yineleyici oluşturur. Bu aşamada hiçbir optimizasyon yapılmaz.
     ///
     /// ```
     /// use qrcode::optimize::{Parser, Segment};
@@ -125,8 +125,8 @@ impl Iterator for Parser<'_> {
 
         loop {
             let (i, ecs) = self.ecs_iter.next()?;
-            // `State` is a multiple of 10 up to 60 and `ExclCharSet` is 0..=9,
-            // so the sum indexes the 70-entry table exactly.
+            // `State` 60'a kadar 10'un katıdır ve `ExclCharSet` 0..=9 aralığındadır,
+            // yani toplam 70 girdilik tabloyu tam olarak indeksler.
             let (next_state, action) = *STATE_TRANSITION.get(self.state as usize + ecs as usize)?;
             self.state = next_state;
 
@@ -222,8 +222,8 @@ mod parse_tests {
 
     #[test]
     fn test_not_kanji_2() {
-        // Note that it's implementation detail that the byte seq is split into
-        // two. Perhaps adjust the test to check for this.
+        // Bayt dizisinin ikiye bölünmesinin bir implementasyon ayrıntısı olduğuna
+        // dikkat edin. Belki test bunu kontrol edecek şekilde ayarlanmalı.
         let segs = parse(b"\xeb\xc0");
         assert_eq!(
             segs,
@@ -254,7 +254,7 @@ mod parse_tests {
 //------------------------------------------------------------------------------
 //{{{ Optimizer
 
-/// QR code data optimizer.
+/// QR kodu veri optimize edici.
 pub struct Optimizer<I> {
     parser: I,
     last_segment: Segment,
@@ -264,11 +264,11 @@ pub struct Optimizer<I> {
 }
 
 impl<I: Iterator<Item = Segment>> Optimizer<I> {
-    /// Optimize the segments by combining adjacent segments when possible.
+    /// Mümkün olduğunda komşu parçaları birleştirerek parçaları optimize eder.
     ///
-    /// Currently this method uses a greedy algorithm by combining segments from
-    /// left to right until the new segment is longer than before. This method
-    /// does *not* use Annex J from the ISO standard.
+    /// Şu anda bu metot açgözlü bir algoritma kullanır: yeni parça öncekinden
+    /// uzun olana dek parçaları soldan sağa birleştirir. Bu metot ISO
+    /// standardındaki Ek J'yi kullan*maz*.
     pub fn new(mut segments: I, version: Version) -> Self {
         match segments.next() {
             None => Self {
@@ -290,7 +290,7 @@ impl<I: Iterator<Item = Segment>> Optimizer<I> {
 }
 
 impl Parser<'_> {
-    /// Creates a new `Optimizer` based on this parser.
+    /// Bu ayrıştırıcıya dayalı yeni bir `Optimizer` oluşturur.
     pub fn optimize(self, version: Version) -> Optimizer<Self> {
         Optimizer::new(self, version)
     }
@@ -335,7 +335,7 @@ impl<I: Iterator<Item = Segment>> Iterator for Optimizer<I> {
     }
 }
 
-/// Computes the total encoded length of all segments.
+/// Tüm parçaların toplam kodlanmış uzunluğunu hesaplar.
 pub fn total_encoded_len(segments: &[Segment], version: Version) -> usize {
     segments.iter().map(|seg| seg.encoded_len(version)).sum()
 }
@@ -484,53 +484,53 @@ fn bench_optimize(bencher: &mut test::Bencher) {
 //------------------------------------------------------------------------------
 //{{{ Internal types and data for parsing
 
-/// All values of `u8` can be split into 9 different character sets when
-/// determining which encoding to use. This enum represents these groupings for
-/// parsing purpose.
+/// Hangi kodlamanın kullanılacağı belirlenirken tüm `u8` değerleri 9 farklı
+/// karakter kümesine ayrılabilir. Bu enum, ayrıştırma amacıyla bu grupları
+/// temsil eder.
 #[derive(Copy, Clone)]
 enum ExclCharSet {
-    /// The end of string.
+    /// Dizginin sonu.
     End = 0,
 
-    /// All symbols supported by the Alphanumeric encoding, i.e. space, `$`, `%`,
-    /// `*`, `+`, `-`, `.`, `/` and `:`.
+    /// Alphanumeric kodlamasının desteklediği tüm semboller; yani boşluk, `$`,
+    /// `%`, `*`, `+`, `-`, `.`, `/` ve `:`.
     Symbol = 1,
 
-    /// All numbers (0–9).
+    /// Tüm rakamlar (0–9).
     Numeric = 2,
 
-    /// All uppercase letters (A–Z). These characters may also appear in the
-    /// second byte of a Shift JIS 2-byte encoding.
+    /// Tüm büyük harfler (A–Z). Bu karakterler bir Shift JIS 2 baytlık
+    /// kodlamasının ikinci baytında da görünebilir.
     Alpha = 3,
 
-    /// The first byte of a Shift JIS 2-byte encoding, in the range 0x81–0x9f.
+    /// Bir Shift JIS 2 baytlık kodlamasının 0x81–0x9f aralığındaki ilk baytı.
     KanjiHi1 = 4,
 
-    /// The first byte of a Shift JIS 2-byte encoding, in the range 0xe0–0xea.
+    /// Bir Shift JIS 2 baytlık kodlamasının 0xe0–0xea aralığındaki ilk baytı.
     KanjiHi2 = 5,
 
-    /// The first byte of a Shift JIS 2-byte encoding, of value 0xeb. This is
-    /// different from the other two range that the second byte has a smaller
-    /// range.
+    /// Bir Shift JIS 2 baytlık kodlamasının 0xeb değerindeki ilk baytı. Bu,
+    /// ikinci baytın daha dar bir aralığa sahip olması bakımından diğer iki
+    /// aralıktan farklıdır.
     KanjiHi3 = 6,
 
-    /// The second byte of a Shift JIS 2-byte encoding, in the range 0x40–0xbf,
-    /// excluding letters (covered by `Alpha`), 0x81–0x9f (covered by `KanjiHi1`),
-    /// and the invalid byte 0x7f.
+    /// Bir Shift JIS 2 baytlık kodlamasının 0x40–0xbf aralığındaki ikinci baytı;
+    /// harfler (`Alpha` kapsıyor), 0x81–0x9f (`KanjiHi1` kapsıyor) ve geçersiz
+    /// bayt 0x7f hariç.
     KanjiLo1 = 7,
 
-    /// The second byte of a Shift JIS 2-byte encoding, in the range 0xc0–0xfc,
-    /// excluding the range 0xe0–0xeb (covered by `KanjiHi2` and `KanjiHi3`).
-    /// This half of byte-pair cannot appear as the second byte leaded by
-    /// `KanjiHi3`.
+    /// Bir Shift JIS 2 baytlık kodlamasının 0xc0–0xfc aralığındaki ikinci baytı;
+    /// 0xe0–0xeb aralığı (`KanjiHi2` ve `KanjiHi3` kapsıyor) hariç. Bayt
+    /// çiftinin bu yarısı `KanjiHi3` tarafından öncelenen ikinci bayt olarak
+    /// görünemez.
     KanjiLo2 = 8,
 
-    /// Any other values not covered by the above character sets.
+    /// Yukarıdaki karakter kümelerinin kapsamadığı diğer tüm değerler.
     Byte = 9,
 }
 
 impl ExclCharSet {
-    /// Determines which character set a byte is in.
+    /// Bir baytın hangi karakter kümesinde olduğunu belirler.
     const fn from_u8(c: u8) -> Self {
         match c {
             0x20 | 0x24 | 0x25 | 0x2a | 0x2b | 0x2d..=0x2f | 0x3a => Self::Symbol,
@@ -546,60 +546,60 @@ impl ExclCharSet {
     }
 }
 
-/// The current parsing state.
+/// Geçerli ayrıştırma durumu.
 #[derive(Copy, Clone)]
 enum State {
-    /// Just initialized.
+    /// Yeni başlatıldı.
     Init = 0,
 
-    /// Inside a string that can be exclusively encoded as Numeric.
+    /// Yalnızca Numeric olarak kodlanabilecek bir dizginin içinde.
     Numeric = 10,
 
-    /// Inside a string that can be exclusively encoded as Alphanumeric.
+    /// Yalnızca Alphanumeric olarak kodlanabilecek bir dizginin içinde.
     Alpha = 20,
 
-    /// Inside a string that can be exclusively encoded as 8-Bit Byte.
+    /// Yalnızca 8-Bit Byte olarak kodlanabilecek bir dizginin içinde.
     Byte = 30,
 
-    /// Just encountered the first byte of a Shift JIS 2-byte sequence of the
-    /// set `KanjiHi1` or `KanjiHi2`.
+    /// `KanjiHi1` ya da `KanjiHi2` kümesinden bir Shift JIS 2 baytlık dizisinin
+    /// ilk baytıyla yeni karşılaşıldı.
     KanjiHi12 = 40,
 
-    /// Just encountered the first byte of a Shift JIS 2-byte sequence of the
-    /// set `KanjiHi3`.
+    /// `KanjiHi3` kümesinden bir Shift JIS 2 baytlık dizisinin ilk baytıyla yeni
+    /// karşılaşıldı.
     KanjiHi3 = 50,
 
-    /// Inside a string that can be exclusively encoded as Kanji.
+    /// Yalnızca Kanji olarak kodlanabilecek bir dizginin içinde.
     Kanji = 60,
 }
 
-/// What should the parser do after a state transition.
+/// Bir durum geçişinden sonra ayrıştırıcının ne yapması gerektiği.
 #[derive(Copy, Clone)]
 enum Action {
-    /// The parser should do nothing.
+    /// Ayrıştırıcı hiçbir şey yapmamalı.
     Idle,
 
-    /// Push the current segment as a Numeric string, and reset the marks.
+    /// Geçerli parçayı Numeric dizgi olarak ekle ve işaretleri sıfırla.
     Numeric,
 
-    /// Push the current segment as an Alphanumeric string, and reset the marks.
+    /// Geçerli parçayı Alphanumeric dizgi olarak ekle ve işaretleri sıfırla.
     Alpha,
 
-    /// Push the current segment as a 8-Bit Byte string, and reset the marks.
+    /// Geçerli parçayı 8-Bit Byte dizgi olarak ekle ve işaretleri sıfırla.
     Byte,
 
-    /// Push the current segment as a Kanji string, and reset the marks.
+    /// Geçerli parçayı Kanji dizgi olarak ekle ve işaretleri sıfırla.
     Kanji,
 
-    /// Push the current segment excluding the last byte as a Kanji string, then
-    /// push the remaining single byte as a Byte string, and reset the marks.
+    /// Son bayt hariç geçerli parçayı Kanji dizgi olarak ekle, ardından kalan tek
+    /// baytı Byte dizgi olarak ekle ve işaretleri sıfırla.
     KanjiAndSingleByte,
 }
 
 static STATE_TRANSITION: [(State, Action); 70] = [
     // STATE_TRANSITION[current_state + next_character] == (next_state, what_to_do)
 
-    // Init state:
+    // Init durumu:
     (State::Init, Action::Idle),      // End
     (State::Alpha, Action::Idle),     // Symbol
     (State::Numeric, Action::Idle),   // Numeric
@@ -610,7 +610,7 @@ static STATE_TRANSITION: [(State, Action); 70] = [
     (State::Byte, Action::Idle),      // KanjiLo1
     (State::Byte, Action::Idle),      // KanjiLo2
     (State::Byte, Action::Idle),      // Byte
-    // Numeric state:
+    // Numeric durumu:
     (State::Init, Action::Numeric),      // End
     (State::Alpha, Action::Numeric),     // Symbol
     (State::Numeric, Action::Idle),      // Numeric
@@ -621,7 +621,7 @@ static STATE_TRANSITION: [(State, Action); 70] = [
     (State::Byte, Action::Numeric),      // KanjiLo1
     (State::Byte, Action::Numeric),      // KanjiLo2
     (State::Byte, Action::Numeric),      // Byte
-    // Alpha state:
+    // Alpha durumu:
     (State::Init, Action::Alpha),      // End
     (State::Alpha, Action::Idle),      // Symbol
     (State::Numeric, Action::Alpha),   // Numeric
@@ -632,7 +632,7 @@ static STATE_TRANSITION: [(State, Action); 70] = [
     (State::Byte, Action::Alpha),      // KanjiLo1
     (State::Byte, Action::Alpha),      // KanjiLo2
     (State::Byte, Action::Alpha),      // Byte
-    // Byte state:
+    // Byte durumu:
     (State::Init, Action::Byte),      // End
     (State::Alpha, Action::Byte),     // Symbol
     (State::Numeric, Action::Byte),   // Numeric
@@ -643,7 +643,7 @@ static STATE_TRANSITION: [(State, Action); 70] = [
     (State::Byte, Action::Idle),      // KanjiLo1
     (State::Byte, Action::Idle),      // KanjiLo2
     (State::Byte, Action::Idle),      // Byte
-    // KanjiHi12 state:
+    // KanjiHi12 durumu:
     (State::Init, Action::KanjiAndSingleByte),    // End
     (State::Alpha, Action::KanjiAndSingleByte),   // Symbol
     (State::Numeric, Action::KanjiAndSingleByte), // Numeric
@@ -654,7 +654,7 @@ static STATE_TRANSITION: [(State, Action); 70] = [
     (State::Kanji, Action::Idle),                 // KanjiLo1
     (State::Kanji, Action::Idle),                 // KanjiLo2
     (State::Byte, Action::KanjiAndSingleByte),    // Byte
-    // KanjiHi3 state:
+    // KanjiHi3 durumu:
     (State::Init, Action::KanjiAndSingleByte),      // End
     (State::Alpha, Action::KanjiAndSingleByte),     // Symbol
     (State::Numeric, Action::KanjiAndSingleByte),   // Numeric
@@ -665,7 +665,7 @@ static STATE_TRANSITION: [(State, Action); 70] = [
     (State::Kanji, Action::Idle),                   // KanjiLo1
     (State::Byte, Action::KanjiAndSingleByte),      // KanjiLo2
     (State::Byte, Action::KanjiAndSingleByte),      // Byte
-    // Kanji state:
+    // Kanji durumu:
     (State::Init, Action::Kanji),     // End
     (State::Alpha, Action::Kanji),    // Symbol
     (State::Numeric, Action::Kanji),  // Numeric

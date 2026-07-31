@@ -1,6 +1,6 @@
-// Examples unwrap to keep the demo short; library code may not -- see the
-// [lints.clippy] gate in Cargo.toml.
-#![allow(clippy::unwrap_used, reason = "example code")]
+// Örnekler demoyu kısa tutmak için unwrap kullanır; kütüphane kodu kullanamaz --
+// bkz. Cargo.toml'daki [lints.clippy] kapısı.
+#![allow(clippy::unwrap_used, reason = "örnek kod")]
 
 use qrcode::QrCode;
 use qrcode::render::pic;

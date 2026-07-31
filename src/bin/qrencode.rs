@@ -3,14 +3,14 @@ use std::process::ExitCode;
 
 pub fn main() -> ExitCode {
     let Some(arg) = env::args().nth(1) else {
-        eprintln!("usage: qrencode <text>");
+        eprintln!("kullanım: qrencode <metin>");
         return ExitCode::FAILURE;
     };
 
     let code = match qrcode::QrCode::new(arg.as_bytes()) {
         Ok(code) => code,
         Err(error) => {
-            eprintln!("qrencode: cannot encode {arg:?}: {error}");
+            eprintln!("qrencode: {arg:?} kodlanamıyor: {error}");
             return ExitCode::FAILURE;
         }
     };
@@ -21,7 +21,7 @@ pub fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("qrencode: cannot render: {error}");
+            eprintln!("qrencode: çizilemiyor: {error}");
             ExitCode::FAILURE
         }
     }

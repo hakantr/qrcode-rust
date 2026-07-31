@@ -1,4 +1,4 @@
-//! The `ec` module applies the Reed-Solomon error correction codes.
+//! `ec` modülü Reed-Solomon hata düzeltme kodlarını uygular.
 
 use alloc::vec::Vec;
 use core::ops::Deref;
@@ -8,22 +8,23 @@ use crate::types::{EcLevel, QrError, QrResult, Version};
 //------------------------------------------------------------------------------
 //{{{ Error correction primitive
 
-/// The largest error correction code size this module can compute, i.e. the
-/// highest degree of generator polynomial this crate has a table for.
+/// Bu modülün hesaplayabileceği en büyük hata düzeltme kodu boyutu; yani bu
+/// crate'in tablosuna sahip olduğu en yüksek dereceli üreteç polinomu.
 pub const MAX_EC_CODE_SIZE: usize = 69;
 
-/// Creates the error correction code in N bytes.
+/// N bayt uzunluğunda hata düzeltme kodunu oluşturur.
 ///
-/// This method treats the data as a polynomial of the form
+/// Bu metot veriyi GF(2<sup>8</sup>) içinde
 /// (a\[0\] x<sup>m+n</sup> + a\[1\] x<sup>m+n-1</sup> + … + a\[m\] x<sup>n</sup>)
-/// in GF(2<sup>8</sup>), and then computes the polynomial modulus with a
-/// generator polynomial of degree N.
+/// biçiminde bir polinom olarak ele alır ve ardından N dereceli bir üreteç
+/// polinomu ile polinom modülünü hesaplar.
 ///
 /// # Errors
 ///
-/// Returns `Err(QrError::InvalidVersion)` if `ec_code_size` exceeds
-/// [`MAX_EC_CODE_SIZE`]. No QR code version calls for a longer block, so this
-/// is unreachable through the encoder itself; it used to be an index panic.
+/// `ec_code_size`, [`MAX_EC_CODE_SIZE`] değerini aşarsa
+/// `Err(QrError::InvalidVersion)` döndürür. Hiçbir QR kodu sürümü daha uzun
+/// bir blok gerektirmez, yani bu kodlayıcı üzerinden erişilemez; eskiden bir
+/// indeks paniğiydi.
 pub fn create_error_correction_code(data: &[u8], ec_code_size: usize) -> QrResult<Vec<u8>> {
     let data_len = data.len();
     let log_den = *GENERATOR_POLYNOMIALS.get(ec_code_size).ok_or(QrError::InvalidVersion)?;
@@ -37,9 +38,9 @@ pub fn create_error_correction_code(data: &[u8], ec_code_size: usize) -> QrResul
             continue;
         }
 
-        // LOG_TABLE and EXP_TABLE are both 256 bytes and are indexed by a `u8`
-        // or by a value reduced modulo 255, so neither lookup can be out of
-        // range; `get` keeps that provable rather than merely commented.
+        // LOG_TABLE ve EXP_TABLE'ın ikisi de 256 bayttır ve bir `u8` ile ya da
+        // modulo 255 indirgenmiş bir değerle indekslenir, yani hiçbir arama aralık
+        // dışı olamaz; `get` bunu yorum olmaktan çıkarıp kanıtlanabilir kılar.
         let log_lead_coeff = LOG_TABLE.get(usize::from(lead_coeff)).copied().map_or(0, usize::from);
         let tail = res.get_mut(i + 1..).unwrap_or_default();
         for (u, v) in tail.iter_mut().zip(log_den.iter()) {
@@ -78,13 +79,13 @@ mod ec_tests {
 //------------------------------------------------------------------------------
 //{{{ Interleave support
 
-/// This method interleaves a vector of slices into a single vector.
+/// Bu metot bir dilim vektörünü tek bir vektöre iç içe geçirir.
 ///
-/// It will first insert all the first elements of the slices in `blocks`, then
-/// all the second elements, then all the third elements, and so on.
+/// Önce `blocks` içindeki dilimlerin tüm ilk öğelerini, sonra tüm ikinci
+/// öğelerini, sonra tüm üçüncü öğelerini ve böyle devam ederek ekler.
 ///
-/// The longest slice must be at the last of `blocks`. An empty `blocks` yields
-/// an empty result.
+/// En uzun dilim `blocks`'un sonunda olmalıdır. Boş bir `blocks` boş bir
+/// sonuç verir.
 fn interleave<T: Copy, V: Deref<Target = [T]>>(blocks: &[V]) -> Vec<T> {
     let last_block_len = blocks.last().map_or(0, |block| block.len());
     let mut res = Vec::with_capacity(last_block_len * blocks.len());
@@ -108,14 +109,14 @@ fn test_interleave() {
 //------------------------------------------------------------------------------
 //{{{ QR code error correction
 
-/// Constructs data and error correction codewords ready to be put in the QR
-/// code matrix.
+/// QR kodu matrisine yerleştirilmeye hazır veri ve hata düzeltme kod
+/// kelimelerini kurar.
 ///
 /// # Errors
 ///
-/// Returns `Err(QrError::InvalidVersion)` if it is not valid to use the
-///  `ec_level` for the given version (e.g. `Version::micro(1)` with
-/// `EcLevel::H`).
+/// Verilen sürüm için `ec_level` kullanmak geçerli değilse (örneğin
+/// `EcLevel::H` ile `Version::micro(1)`) `Err(QrError::InvalidVersion)`
+/// döndürür.
 pub fn construct_codewords(rawbits: &[u8], version: Version, ec_level: EcLevel) -> QrResult<(Vec<u8>, Vec<u8>)> {
     let (block_1_size, block_1_count, block_2_size, block_2_count) = version.fetch(ec_level, &DATA_BYTES_PER_BLOCK)?;
 
@@ -123,13 +124,13 @@ pub fn construct_codewords(rawbits: &[u8], version: Version, ec_level: EcLevel) 
     let block_1_end = block_1_size * block_1_count;
     let total_size = block_1_end + block_2_size * block_2_count;
 
-    // `rawbits` comes from the caller, so its length has to be checked rather
-    // than assumed: slicing it blind used to abort on a short input.
+    // `rawbits` çağırandan gelir, bu yüzden uzunluğu varsayılmak yerine kontrol
+    // edilmeli: körlemesine dilimlemek kısa bir girdide abort'a yol açıyordu.
     if rawbits.len() != total_size {
         return Err(QrError::DataTooLong);
     }
 
-    // Divide the data into blocks.
+    // Veriyi bloklara böl.
     let mut blocks = Vec::with_capacity(blocks_count);
     let (head, tail) = rawbits.split_at(block_1_end);
     blocks.extend(head.chunks(block_1_size));
@@ -137,7 +138,7 @@ pub fn construct_codewords(rawbits: &[u8], version: Version, ec_level: EcLevel) 
         blocks.extend(tail.chunks(block_2_size));
     }
 
-    // Generate EC codes.
+    // EC kodlarını üret.
     let ec_bytes = version.fetch(ec_level, &EC_BYTES_PER_BLOCK)?;
     let ec_codes =
         blocks.iter().map(|block| create_error_correction_code(block, ec_bytes)).collect::<QrResult<Vec<Vec<u8>>>>()?;
@@ -184,14 +185,14 @@ mod construct_codewords_test {
 //------------------------------------------------------------------------------
 //{{{ Number of allowed errors
 
-/// Computes the maximum allowed number of erratic modules can be introduced to
-/// the QR code, before the data becomes truly corrupted.
+/// Veri gerçekten bozulmadan önce QR koduna eklenebilecek en fazla hatalı
+/// modül sayısını hesaplar.
 ///
 /// # Errors
 ///
-/// Returns `Err(QrError::InvalidVersion)` if it is not valid to use the
-///  `ec_level` for the given version (e.g. `Version::micro(1)` with
-/// `EcLevel::H`).
+/// Verilen sürüm için `ec_level` kullanmak geçerli değilse (örneğin
+/// `EcLevel::H` ile `Version::micro(1)`) `Err(QrError::InvalidVersion)`
+/// döndürür.
 pub fn max_allowed_errors(version: Version, ec_level: EcLevel) -> QrResult<usize> {
     use crate::EcLevel::{L, M};
     use crate::types::VersionKind::{Micro, Normal};
@@ -263,7 +264,7 @@ mod max_allowed_errors_test {
 //------------------------------------------------------------------------------
 //{{{ Precomputed tables for GF(256).
 
-/// `EXP_TABLE` encodes the value of 2<sup>n</sup> in the Galois Field GF(256).
+/// `EXP_TABLE`, Galois Alanı GF(256) içinde 2<sup>n</sup> değerini kodlar.
 static EXP_TABLE: &[u8] = b"\
 \x01\x02\x04\x08\x10\x20\x40\x80\x1d\x3a\x74\xe8\xcd\x87\x13\x26\
 \x4c\x98\x2d\x5a\xb4\x75\xea\xc9\x8f\x03\x06\x0c\x18\x30\x60\xc0\
@@ -282,7 +283,7 @@ static EXP_TABLE: &[u8] = b"\
 \x12\x24\x48\x90\x3d\x7a\xf4\xf5\xf7\xf3\xfb\xeb\xcb\x8b\x0b\x16\
 \x2c\x58\xb0\x7d\xfa\xe9\xcf\x83\x1b\x36\x6c\xd8\xad\x47\x8e\x01";
 
-/// `LOG_TABLE` is the inverse function of `EXP_TABLE`.
+/// `LOG_TABLE`, `EXP_TABLE`'ın ters fonksiyonudur.
 static LOG_TABLE: &[u8] = b"\
 \xff\x00\x01\x19\x02\x32\x1a\xc6\x03\xdf\x33\xee\x1b\x68\xc7\x4b\
 \x04\x64\xe0\x0e\x34\x8d\xef\x81\x1c\xc1\x69\xf8\xc8\x08\x4c\x71\
@@ -301,17 +302,18 @@ static LOG_TABLE: &[u8] = b"\
 \xcb\x59\x5f\xb0\x9c\xa9\xa0\x51\x0b\xf5\x16\xeb\x7a\x75\x2c\xd7\
 \x4f\xae\xd5\xe9\xe6\xe7\xad\xe8\x74\xd6\xf4\xea\xa8\x50\x58\xaf";
 
-/// The generator polynomial list.
+/// Üreteç polinomu listesi.
 ///
-/// `GENERATOR_POLYNOMIALS[i]` is the polynomial for `i` error correction code
-/// words. Each entry encodes the log coefficients of the expanded polynomial
-/// (x − 2<sup>0</sup>)(x − 2<sup>1</sup>)…(x − 2<sup>i-1</sup>). Each entry is
-/// used as the denominator for polynomial division to obtain the modulus which
-/// is the Reed-Solomon error correction code.
+/// `GENERATOR_POLYNOMIALS[i]`, `i` hata düzeltme kod kelimesi için olan
+/// polinomdur. Her girdi açılmış
+/// (x − 2<sup>0</sup>)(x − 2<sup>1</sup>)…(x − 2<sup>i-1</sup>) polinomunun
+/// logaritmik katsayılarını kodlar. Her girdi, Reed-Solomon hata düzeltme kodu
+/// olan modülü elde etmek için yapılan polinom bölmesinde payda olarak
+/// kullanılır.
 ///
-/// A partial list can be found from ISO/IEC 18004:2006 Annex A.
+/// Kısmi bir liste ISO/IEC 18004:2006 Ek A'da bulunabilir.
 #[rustfmt::skip]
-// ^ this attribute is currently useless, see rust-lang-nursery/rustfmt#1080 and 1298
+// ^ bu öznitelik şu anda işe yaramıyor, bkz. rust-lang-nursery/rustfmt#1080 ve 1298
 static GENERATOR_POLYNOMIALS: [&[u8]; 70] = [
     b"",
     b"\x00",
@@ -389,13 +391,13 @@ static GENERATOR_POLYNOMIALS: [&[u8]; 70] = [
 //------------------------------------------------------------------------------
 //{{{ Tables for error correction sizes
 
-/// `EC_BYTES_PER_BLOCK` provides the number of codewords (bytes) used for error
-/// correction per block in each version.
+/// `EC_BYTES_PER_BLOCK`, her sürümde blok başına hata düzeltme için kullanılan
+/// kod kelimesi (bayt) sayısını verir.
 ///
-/// This is a copy of ISO/IEC 18004:2006, §6.5.1, Table 9 (The 4th column divide
-/// by the sum of the 6th column).
+/// Bu, ISO/IEC 18004:2006, §6.5.1, Tablo 9'un bir kopyasıdır (4. sütunun 6.
+/// sütunun toplamına bölümü).
 static EC_BYTES_PER_BLOCK: [[usize; 4]; 44] = [
-    // Normal versions.
+    // Normal sürümler.
     [7, 10, 13, 17],  // 1
     [10, 16, 22, 28], // 2
     [15, 26, 18, 22], // 3
@@ -436,24 +438,25 @@ static EC_BYTES_PER_BLOCK: [[usize; 4]; 44] = [
     [30, 28, 30, 30], // 38
     [30, 28, 30, 30], // 39
     [30, 28, 30, 30], // 40
-    // Micro versions.
+    // Micro sürümler.
     [2, 0, 0, 0],   // M1
     [5, 6, 0, 0],   // M2
     [6, 8, 0, 0],   // M3
     [8, 10, 14, 0], // M4
 ];
 
-/// `DATA_BYTES_PER_BLOCK` provides the number of codewords (bytes) used for
-/// real data per block in each version.
+/// `DATA_BYTES_PER_BLOCK`, her sürümde blok başına gerçek veri için kullanılan
+/// kod kelimesi (bayt) sayısını verir.
 ///
-/// This is a copy of ISO/IEC 18004:2006, §6.5.1, Table 9 (The value "k" of the
-/// 7th column, followed by the 6th column).
+/// Bu, ISO/IEC 18004:2006, §6.5.1, Tablo 9'un bir kopyasıdır (7. sütunun "k"
+/// değeri, ardından 6. sütun).
 ///
-/// Every entry is a 4-tuple. Take `DATA_BYTES_PER_BLOCK[39][3] == (15, 20, 16, 61)`
-/// as an example, this means in version 40 with correction level H, there are
-/// 20 blocks with 15 bytes in size, and 61 blocks with 16 bytes in size.
+/// Her girdi 4'lü bir demettir. Örnek olarak
+/// `DATA_BYTES_PER_BLOCK[39][3] == (15, 20, 16, 61)` alınırsa, bu sürüm 40'ta
+/// H düzeltme seviyesiyle 15 bayt boyutunda 20 blok ve 16 bayt boyutunda 61
+/// blok olduğu anlamına gelir.
 static DATA_BYTES_PER_BLOCK: [[(usize, usize, usize, usize); 4]; 44] = [
-    // Normal versions.
+    // Normal sürümler.
     [(19, 1, 0, 0), (16, 1, 0, 0), (13, 1, 0, 0), (9, 1, 0, 0)], // 1
     [(34, 1, 0, 0), (28, 1, 0, 0), (22, 1, 0, 0), (16, 1, 0, 0)], // 2
     [(55, 1, 0, 0), (44, 1, 0, 0), (17, 2, 0, 0), (13, 2, 0, 0)], // 3
@@ -494,7 +497,7 @@ static DATA_BYTES_PER_BLOCK: [[(usize, usize, usize, usize); 4]; 44] = [
     [(122, 4, 123, 18), (46, 13, 47, 32), (24, 48, 25, 14), (15, 42, 16, 32)], // 38
     [(117, 20, 118, 4), (47, 40, 48, 7), (24, 43, 25, 22), (15, 10, 16, 67)], // 39
     [(118, 19, 119, 6), (47, 18, 48, 31), (24, 34, 25, 34), (15, 20, 16, 61)], // 40
-    // Micro versions.
+    // Micro sürümler.
     [(3, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)], // M1
     [(5, 1, 0, 0), (4, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)], // M2
     [(11, 1, 0, 0), (9, 1, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0)], // M3

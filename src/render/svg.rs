@@ -1,4 +1,4 @@
-//! SVG rendering support.
+//! SVG çizim desteği.
 //!
 //! # Example
 //!
@@ -20,7 +20,7 @@ use core::marker::PhantomData;
 use crate::render::{Canvas as RenderCanvas, Pixel};
 use crate::types::Color as ModuleColor;
 
-/// An SVG color.
+/// Bir SVG rengi.
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Color<'a>(pub &'a str);
 
@@ -68,8 +68,8 @@ impl<'a> RenderCanvas for Canvas<'a> {
     }
 
     fn draw_dark_rect(&mut self, left: u32, top: u32, width: u32, height: u32) {
-        // Writing into a `String` is infallible; the `Result` only exists to
-        // satisfy the `fmt::Write` signature.
+        // Bir `String`'e yazmak hatasızdır; `Result` yalnızca `fmt::Write`
+        // imzasını karşılamak için vardır.
         let _ = write!(self.svg, "M{left} {top}h{width}v{height}h-{width}z");
     }
 

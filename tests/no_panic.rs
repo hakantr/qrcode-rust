@@ -1,25 +1,27 @@
-//! Exhaustive sweep asserting that no public entry point aborts the process.
+//! Hiçbir genel giriş noktasının süreci abort etmediğini doğrulayan kapsamlı
+//! tarama.
 //!
-//! The crate's contract is that a *valid* input never panics and an invalid one
-//! comes back as a [`QrError`]. That is easy to regress silently, so this test
-//! walks the whole combination space -- every version, every error correction
-//! level, every mask pattern, coordinates on and past every edge -- and fails
-//! on the first panic rather than on a wrong answer.
+//! Crate'in sözleşmesi şudur: *geçerli* bir girdi asla paniklemez, geçersiz
+//! olan ise [`QrError`] olarak geri döner. Bu sessizce bozulması kolay bir
+//! şeydir; bu yüzden bu test tüm bileşim uzayını -- her sürüm, her hata
+//! düzeltme seviyesi, her maske deseni, her kenarın üzerindeki ve ötesindeki
+//! koordinatlar -- dolaşır ve yanlış bir cevapta değil, ilk panikte başarısız
+//! olur.
 //!
-//! It runs as an integration test so it only sees the public API, which is
-//! exactly the surface the contract covers. The panicking methods that have a
-//! documented checked counterpart (`Canvas::get`, `Renderer::new`,
-//! `QrCode::is_functional`, indexing) are deliberately exercised through their
-//! checked form here.
+//! Bir entegrasyon testi olarak çalışır, yani yalnızca genel API'yi görür;
+//! sözleşmenin kapsadığı yüzey de tam olarak budur. Belgelenmiş kontrollü bir
+//! karşılığı olan panikleyen metotlar (`Canvas::get`, `Renderer::new`,
+//! `QrCode::is_functional`, indeksleme) burada bilinçli olarak kontrollü
+//! biçimleri üzerinden kullanılır.
 
-// This test asserts by panicking, which is the one place the crate's own
-// no-panic gate has to stand down.
+// Bu test panikleyerek doğrulama yapar; crate'in kendi panik kapısının geri
+// çekilmek zorunda olduğu tek yer burasıdır.
 #![allow(
     clippy::unwrap_used,
     clippy::panic,
     clippy::match_wild_err_arm,
     clippy::indexing_slicing,
-    reason = "the test reports failures by panicking"
+    reason = "test hataları panikleyerek bildirir"
 )]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -42,16 +44,17 @@ const MASK_PATTERNS: [MaskPattern; 8] = [
     MaskPattern::Meadow,
 ];
 
-/// Every version the standard defines, plus the numbers just outside each
-/// family's range so the constructors are exercised too.
+/// Standardın tanımladığı her sürüm; ayrıca kurucuların da denenmesi için her
+/// ailenin aralığının hemen dışındaki sayılar.
 fn all_versions() -> Vec<Version> {
     let normal = (1..=40).filter_map(|n| Version::normal(n).ok());
     normal.chain((1..=4).filter_map(|n| Version::micro(n).ok())).collect()
 }
 
-/// Round counts for the randomised sweep. A debug build runs the encoder about
-/// twenty times slower, so it does a lighter pass; CI runs this file with
-/// `--release`, which is also the profile the no-panic guarantee is about.
+/// Rastgele tarama için tur sayıları. Bir debug derlemesi kodlayıcıyı yaklaşık
+/// yirmi kat yavaş çalıştırır, bu yüzden daha hafif bir geçiş yapar; CI bu
+/// dosyayı `--release` ile çalıştırır ki panik güvencesinin konusu olan profil
+/// de odur.
 const RANDOM_ROUNDS: usize = if cfg!(debug_assertions) { 300 } else { 4_000 };
 const SIZING_ROUNDS: usize = if cfg!(debug_assertions) { 200 } else { 1_000 };
 
@@ -59,7 +62,7 @@ const SIZING_ROUNDS: usize = if cfg!(debug_assertions) { 200 } else { 1_000 };
 fn no_panic<T>(what: &str, f: impl FnOnce() -> T) -> T {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(value) => value,
-        Err(_) => panic!("panicked: {what}"),
+        Err(_) => panic!("panikledi: {what}"),
     }
 }
 
@@ -80,12 +83,12 @@ fn version_constructors_reject_out_of_range_numbers() {
 #[test]
 fn encoding_never_panics_for_any_version_and_ec_level() {
     for version in all_versions() {
-        // Only the Micro versions hold a non-multiple of 8 data bits, so they
-        // are where the terminator offset matters. Sweeping every length there
-        // and spot-checking the Normal ones keeps this test quick enough to run
-        // on every commit.
-        // A Normal version always holds a whole number of codewords, so one
-        // short and one long payload is enough there.
+        // Yalnızca Micro sürümler 8'in katı olmayan sayıda veri biti tutar, yani
+        // sonlandırıcı ofsetinin önem taşıdığı yerler onlardır. Orada her uzunluğu
+        // taramak ve Normal olanları örnekleme yapmak bu testi her commit'te
+        // çalıştırılabilecek kadar hızlı tutar.
+        // Bir Normal sürüm her zaman tam sayıda kod kelimesi tutar, yani orada bir
+        // kısa ve bir uzun yük yeterlidir.
         let lengths: &[usize] = if version.is_micro() {
             &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 20, 21, 22, 23, 24, 32]
         } else {
@@ -111,13 +114,13 @@ fn encoding_never_panics_for_any_version_and_ec_level() {
 fn arbitrary_bytes_never_panic() {
     use qrcode::bits::Bits;
 
-    // The parser assigns a mode to every byte, and the per-mode encoders must
-    // accept whatever it produces. Every ordered pair covers each Shift JIS
-    // lead/trail combination, including the ones just past the encodable range.
+    // Ayrıştırıcı her bayta bir mod atar ve mod başına kodlayıcılar onun
+    // ürettiği her şeyi kabul etmelidir. Her sıralı çift, kodlanabilir aralığın
+    // hemen dışındakiler dahil, her Shift JIS öncü/izleyen bileşimini kapsar.
     //
-    // This drives the segmentation and bit-packing stages directly; running the
-    // mask search 65536 times would dominate the runtime without covering
-    // anything the sweep below does not.
+    // Bu doğrudan bölümleme ve bit paketleme aşamalarını sürer; maske aramasını
+    // 65536 kez çalıştırmak, aşağıdaki taramanın kapsamadığı hiçbir şeyi
+    // kapsamadan çalışma süresine hâkim olurdu.
     let version = Version::normal(40).unwrap();
     for hi in 0..=u8::MAX {
         for lo in 0..=u8::MAX {
@@ -128,7 +131,7 @@ fn arbitrary_bytes_never_panic() {
         }
     }
 
-    // And the whole pipeline over a smaller but still adversarial sample.
+    // Ve daha küçük ama yine de zorlayıcı bir örneklem üzerinde tüm boru hattı.
     for hi in (0..=u8::MAX).step_by(7) {
         no_panic(&format!("QrCode::new([{hi:#04x}])"), || {
             let _ = QrCode::new([hi]);
@@ -150,9 +153,9 @@ fn every_mask_pattern_on_every_symbol_is_accepted_or_rejected_cleanly() {
                 no_panic(&what, || {
                     let mut canvas = Canvas::new(version, ec_level);
                     canvas.draw_all_functional_patterns();
-                    // Micro symbols support only 4 of the 8 patterns, and some
-                    // version/ec_level pairs do not exist at all. Both must come
-                    // back as an error, not an abort.
+                    // Micro semboller 8 desenden yalnızca 4'ünü destekler ve bazı
+                    // sürüm/ec_level çiftleri hiç var olmaz. Her ikisi de abort değil, hata
+                    // olarak geri dönmelidir.
                     let _ = canvas.try_apply_mask(pattern);
                 });
             }
@@ -197,7 +200,7 @@ fn coordinates_outside_the_symbol_are_reported_not_fatal() {
 fn renderer_reports_bad_input_instead_of_aborting() {
     let content = [Color::Dark; 9];
 
-    // Mismatched length.
+    // Uyuşmayan uzunluk.
     for modules_count in [0, 1, 2, 4, 100] {
         no_panic(&format!("Renderer::try_new(len=9, {modules_count})"), || {
             assert!(Renderer::<char>::try_new(&content, modules_count, 4).is_err());
@@ -207,20 +210,20 @@ fn renderer_reports_bad_input_instead_of_aborting() {
         assert!(Renderer::<char>::try_new(&content, 3, 4).is_ok());
     });
 
-    // A `modules_count` whose square overflows `usize` used to wrap into a
-    // length that could spuriously match.
+    // Karesi `usize`'ı taşıran bir `modules_count` eskiden tesadüfen uyabilecek
+    // bir uzunluğa sarmalanıyordu.
     no_panic("Renderer::try_new(overflowing modules_count)", || {
         assert!(Renderer::<char>::try_new(&content, usize::MAX, 4).is_err());
     });
 
-    // An empty QR code has no modules; sizing used to divide by zero.
+    // Boş bir QR kodunun modülü yoktur; boyutlandırma eskiden sıfıra bölüyordu.
     no_panic("Renderer with zero modules", || {
         let mut renderer = Renderer::<char>::try_new(&[], 0, 0).unwrap();
         let _ = renderer.min_dimensions(200, 200).try_build();
         let _ = renderer.max_dimensions(200, 200).try_build();
     });
 
-    // Dimensions that overflow `u32` must be reported, not wrapped.
+    // `u32`'yi taşıran boyutlar sarmalanmalı değil, bildirilmelidir.
     no_panic("Renderer with overflowing module size", || {
         let code = QrCode::new(b"hi").unwrap();
         assert!(code.render::<char>().module_dimensions(u32::MAX, u32::MAX).try_build().is_err());
@@ -259,13 +262,13 @@ fn renderers_never_panic_for_any_symbol() {
     }
 }
 
-/// A dependency-free randomised round over the same surface the `fuzz/` targets
-/// cover, so the guarantee is checked on every `cargo test` and not only when
-/// somebody runs `cargo fuzz`. Deterministic: the seed is fixed, so a failure
-/// reproduces.
+/// `fuzz/` hedeflerinin kapsadığı aynı yüzey üzerinde bağımlılıksız bir
+/// rastgele tur; böylece güvence yalnızca biri `cargo fuzz` çalıştırdığında
+/// değil, her `cargo test`te kontrol edilir. Deterministiktir: tohum sabit
+/// olduğundan bir başarısızlık yeniden üretilebilir.
 #[test]
 fn randomised_inputs_never_panic() {
-    // xorshift64*, enough for shaking out shapes the structured sweep misses.
+    // xorshift64*; yapılandırılmış taramanın kaçırdığı biçimleri silkelemeye yeter.
     let mut state = 0x2545_F491_4F6C_DD1D_u64;
     let mut next = move || {
         state ^= state >> 12;
@@ -279,8 +282,8 @@ fn randomised_inputs_never_panic() {
         let length = usize::try_from(next() % 40).unwrap();
         let data: Vec<u8> = (0..length).map(|_| u8::try_from(next() % 256).unwrap()).collect();
 
-        // Unconstrained version numbers: the constructors have to reject the
-        // out-of-range ones rather than let them reach a table lookup.
+        // Kısıtsız sürüm numaraları: kurucular aralık dışı olanları bir tablo
+        // aramasına ulaşmalarına izin vermek yerine reddetmelidir.
         let number = i16::try_from(next() % 64).unwrap() - 8;
         let version = if next() % 2 == 0 { Version::normal(number) } else { Version::micro(number) };
         let ec_level = EC_LEVELS[usize::try_from(next() % 4).unwrap()];
@@ -299,7 +302,7 @@ fn randomised_inputs_never_panic() {
         assert!(result.is_ok(), "panicked: {what}");
     }
 
-    // Sizing requests are the other half: the arithmetic used to wrap.
+    // Boyutlandırma istekleri diğer yarısıdır: aritmetik eskiden sarmalanıyordu.
     let code = QrCode::new(b"fuzz").unwrap();
     for round in 0..SIZING_ROUNDS {
         let mw = u32::try_from(next() % 4).unwrap().saturating_mul(u32::MAX / 3);

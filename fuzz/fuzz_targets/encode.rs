@@ -1,8 +1,9 @@
-//! Drives the encoder over arbitrary payloads and version/ec combinations.
+//! Kodlayıcıyı rastgele yükler ve sürüm/ec bileşimleri üzerinde sürer.
 //!
-//! The contract under test: for any input, `qrcode` either produces a symbol or
-//! returns a `QrError`. It never aborts. Built with `overflow-checks = true`, so
-//! arithmetic that would silently wrap in a normal release build fails here.
+//! Test edilen sözleşme: herhangi bir girdi için `qrcode` ya bir sembol üretir
+//! ya da bir `QrError` döndürür. Asla abort etmez. `overflow-checks = true` ile
+//! derlenir, yani normal bir release derlemesinde sessizce sarmalanacak
+//! aritmetik burada başarısız olur.
 
 #![no_main]
 
@@ -31,8 +32,8 @@ impl From<Level> for EcLevel {
 
 #[derive(Arbitrary, Debug)]
 struct Input {
-    /// Deliberately unconstrained: out-of-range numbers must be rejected by the
-    /// constructors rather than propagate into a table lookup.
+    /// Bilinçli olarak kısıtsız: aralık dışı sayılar bir tablo aramasına
+    /// yayılmak yerine kurucular tarafından reddedilmelidir.
     version_number: i16,
     micro: bool,
     level: Level,
@@ -44,7 +45,7 @@ fuzz_target!(|input: Input| {
     let ec_level = EcLevel::from(input.level);
 
     if input.auto_version {
-        // The version-picking path: must fit the data or report DataTooLong.
+        // Sürüm seçme yolu: veri sığmalı ya da DataTooLong bildirilmeli.
         if let Ok(code) = QrCode::with_error_correction_level(&input.data, ec_level) {
             assert_eq!(code.to_colors().len(), code.width() * code.width());
             let _ = code.max_allowed_errors();
@@ -59,7 +60,7 @@ fuzz_target!(|input: Input| {
         assert_eq!(code.width(), usize::try_from(version.width()).unwrap());
         assert_eq!(code.to_colors().len(), code.width() * code.width());
 
-        // Every in-range coordinate resolves, every out-of-range one reports.
+        // Aralık içindeki her koordinat çözülür, aralık dışındaki her biri bildirilir.
         let width = code.width();
         assert!(code.get(width, 0).is_none());
         assert!(code.get(0, width).is_none());

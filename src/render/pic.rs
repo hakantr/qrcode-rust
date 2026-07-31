@@ -1,4 +1,4 @@
-//! PIC rendering support.
+//! PIC çizim desteği.
 //!
 //! # Example
 //!
@@ -19,7 +19,7 @@ use core::fmt::Write;
 use crate::render::{Canvas as RenderCanvas, Pixel};
 use crate::types::Color as ModuleColor;
 
-/// A PIC color.
+/// Bir PIC rengi.
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Color;
 
@@ -60,7 +60,7 @@ impl RenderCanvas for Canvas {
     }
 
     fn draw_dark_rect(&mut self, left: u32, top: u32, width: u32, height: u32) {
-        // Writing into a `String` is infallible.
+        // Bir `String`'e yazmak hatasızdır.
         let _ = writeln!(self.pic, "p({left},{top},{width},{height})");
     }
 

@@ -1,16 +1,15 @@
-//! Drives the renderers over arbitrary sizing requests.
+//! Çizicileri rastgele boyutlandırma istekleri üzerinde sürer.
 //!
-//! The sizing arithmetic is where a `u32` overflow used to wrap silently and
-//! produce an image of the wrong dimensions. Everything here goes through the
-//! `try_` forms, which must report rather than abort.
+//! Boyutlandırma aritmetiği, bir `u32` taşmasının eskiden sessizce sarmalanıp
+//! yanlış boyutta bir görüntü ürettiği yerdir. Buradaki her şey, abort etmek
+//! yerine bildirmesi gereken `try_` biçimlerinden geçer.
 //!
-//! Sizes are drawn from two bands rather than the whole `u32` range. The
-//! interesting cases are the small ones, which actually allocate and render,
-//! and the extreme ones, which have to be rejected before anything is
-//! allocated. The band in between is neither: a request like 526575x1785 is
-//! legal, under `MAX_IMAGE_PIXELS`, and simply needs several gigabytes -- the
-//! allocator running out there is the caller's business, not a defect, and
-//! chasing it would crowd out every other finding.
+//! Boyutlar tüm `u32` aralığı yerine iki banttan çekilir. İlginç durumlar
+//! gerçekten ayırma yapıp çizen küçük olanlar ile herhangi bir şey ayrılmadan
+//! önce reddedilmesi gereken uç olanlardır. Aradaki bant ikisi de değildir:
+//! 526575x1785 gibi bir istek yasaldır, `MAX_IMAGE_PIXELS`'in altındadır ve
+//! yalnızca birkaç gigabayt gerektirir -- orada ayırıcının tükenmesi bir defekt
+//! değil çağıranın meselesidir ve bunu kovalamak diğer tüm bulguları bastırırdı.
 
 #![no_main]
 
@@ -19,12 +18,12 @@ use qrcode::QrCode;
 use qrcode::render::Renderer;
 use qrcode::types::Color;
 
-/// Keeps a rendered image under a few megabytes.
+/// Çizilen bir görüntüyü birkaç megabaytın altında tutar.
 const MAX_RENDERED_SIDE: u32 = 2048;
 
 #[derive(arbitrary::Arbitrary, Debug)]
 struct Dimension {
-    /// Picks the band: extremes must be rejected, small values must render.
+    /// Bandı seçer: uçlar reddedilmeli, küçük değerler çizilmelidir.
     extreme: bool,
     value: u32,
 }
@@ -32,8 +31,8 @@ struct Dimension {
 impl Dimension {
     fn get(&self) -> u32 {
         if self.extreme {
-            // Values that must overflow or exceed MAX_IMAGE_PIXELS. Rejection
-            // happens before any allocation, so these stay cheap.
+            // Taşması ya da MAX_IMAGE_PIXELS'i aşması gereken değerler. Reddetme
+            // herhangi bir ayırmadan önce olur, bu yüzden bunlar ucuz kalır.
             u32::MAX - (self.value % 4)
         } else {
             self.value % MAX_RENDERED_SIDE
@@ -51,18 +50,18 @@ struct Input {
     max_width: Dimension,
     max_height: Dimension,
     quiet_zone: bool,
-    /// Fed straight to `Renderer::try_new` alongside a mismatched buffer, so
-    /// the length check and its overflow guard both get exercised.
+    /// Uzunluk kontrolü ve taşma koruması birlikte denensin diye uyuşmayan bir
+    /// tamponla birlikte doğrudan `Renderer::try_new`'a verilir.
     raw_modules_count: usize,
 }
 
 fuzz_target!(|input: Input| {
-    // A renderer built by hand, with a `modules_count` that probably does not
-    // match the content length.
+    // Elle kurulmuş bir çizici; `modules_count` muhtemelen içerik uzunluğuyla
+    // uyuşmuyor.
     let content = [Color::Dark, Color::Light, Color::Light, Color::Dark];
     match Renderer::<char>::try_new(&content, input.raw_modules_count, 4) {
         Ok(mut renderer) => {
-            // try_new only succeeds for modules_count == 2 here.
+            // Burada try_new yalnızca modules_count == 2 için başarılı olur.
             assert_eq!(input.raw_modules_count, 2);
             let _ = renderer.module_dimensions(input.module_width.get(), input.module_height.get()).try_build();
         }
@@ -79,12 +78,12 @@ fuzz_target!(|input: Input| {
         .max_dimensions(input.max_width.get(), input.max_height.get());
 
     if let Ok(image) = renderer.try_build() {
-        // A built image always has at least the QR code's own modules in it.
+        // Çizilmiş bir görüntü her zaman en azından QR kodunun kendi modüllerini içerir.
         assert!(image.lines().count() > 0);
     }
 
-    // The vector backends do not allocate per pixel, so they are safe to drive
-    // at any size the sizing arithmetic accepts.
+    // Vektör arka uçları piksel başına ayırma yapmaz, bu yüzden boyutlandırma
+    // aritmetiğinin kabul ettiği her boyutta sürülmeleri güvenlidir.
     let _ = code.render::<qrcode::render::unicode::Dense1x2>().try_build();
     let _ = code.render::<qrcode::render::svg::Color>().try_build();
     let _ = code.render::<qrcode::render::eps::Color>().try_build();

@@ -1,6 +1,6 @@
-//! QR Code encoder
+//! QR kodu kodlayıcı
 //!
-//! This crate provides a QR code and Micro QR code encoder for binary data.
+//! Bu crate ikili veriler için bir QR kodu ve Micro QR kodu kodlayıcı sağlar.
 //!
 //! ```
 //! # #[cfg(feature = "image")]
@@ -8,30 +8,30 @@
 //! use image::Luma;
 //! use qrcode::QrCode;
 //!
-//! // Encode some data into bits.
+//! // Bir miktar veriyi bitlere kodla.
 //! let code = QrCode::new(b"01234567").unwrap();
 //!
-//! // Render the bits into an image.
+//! // Bitleri bir görüntüye çiz.
 //! let image = code.render::<Luma<u8>>().build();
 //!
-//! // Save the image.
+//! // Görüntüyü kaydet.
 //! # if cfg!(unix) {
 //! image.save("/tmp/qrcode.png").unwrap();
 //! # }
 //!
-//! // You can also render it into a string.
+//! // Onu bir metne de çizebilirsiniz.
 //! let string = code.render().light_color(' ').dark_color('#').build();
 //! println!("{string}");
 //! # }
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "bench", feature(test))] // Unstable libraries
+#![cfg_attr(feature = "bench", feature(test))] // Kararsız kütüphaneler
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![warn(missing_docs)]
-// Tests are allowed to be blunt: an `unwrap` in a test is a failed assertion,
-// not a panic escaping to a caller. The lint gate in Cargo.toml covers the
-// library code, which is what the no-panic contract is about.
+// Testlerin sert olmasına izin var: bir testteki `unwrap` çağırana sızan bir
+// panik değil, başarısız bir doğrulamadır. Cargo.toml'daki lint kapısı,
+// panik sözleşmesinin konusu olan kütüphane kodunu kapsar.
 #![cfg_attr(
     test,
     allow(
@@ -40,11 +40,11 @@
         clippy::indexing_slicing,
         clippy::panic,
         clippy::unreachable,
-        reason = "test code asserts by panicking"
+        reason = "test kodu panikleyerek doğrulama yapar"
     )
 )]
 #![cfg_attr(feature = "bench", doc = include_str!("../README.md"))]
-// ^ make sure we can test our README.md.
+// ^ README.md'mizi test edebildiğimizden emin oluyoruz.
 
 extern crate alloc;
 
@@ -65,7 +65,7 @@ pub use crate::types::{Color, EcLevel, QrResult, Version};
 use crate::cast::As;
 use crate::render::{Pixel, Renderer};
 
-/// The encoded QR code symbol.
+/// Kodlanmış QR kodu sembolü.
 #[derive(Clone)]
 pub struct QrCode {
     content: Vec<Color>,
@@ -75,10 +75,10 @@ pub struct QrCode {
 }
 
 impl QrCode {
-    /// Constructs a new QR code which automatically encodes the given data.
+    /// Verilen veriyi otomatik olarak kodlayan yeni bir QR kodu kurar.
     ///
-    /// This method uses the "medium" error correction level and automatically
-    /// chooses the smallest QR code.
+    /// Bu metot "orta" hata düzeltme seviyesini kullanır ve en küçük QR kodunu
+    /// otomatik olarak seçer.
     ///
     /// ```
     /// use qrcode::QrCode;
@@ -88,16 +88,15 @@ impl QrCode {
     ///
     /// # Errors
     ///
-    /// Returns error if the QR code cannot be constructed, e.g. when the data
-    /// is too long.
+    /// QR kodu kurulamıyorsa, örneğin veri fazla uzunsa, hata döndürür.
     pub fn new<D: AsRef<[u8]>>(data: D) -> QrResult<Self> {
         Self::with_error_correction_level(data, EcLevel::M)
     }
 
-    /// Constructs a new QR code which automatically encodes the given data at a
-    /// specific error correction level.
+    /// Verilen veriyi belirli bir hata düzeltme seviyesinde otomatik olarak
+    /// kodlayan yeni bir QR kodu kurar.
     ///
-    /// This method automatically chooses the smallest QR code.
+    /// Bu metot en küçük QR kodunu otomatik olarak seçer.
     ///
     /// ```
     /// use qrcode::{EcLevel, QrCode};
@@ -107,15 +106,13 @@ impl QrCode {
     ///
     /// # Errors
     ///
-    /// Returns error if the QR code cannot be constructed, e.g. when the data
-    /// is too long.
+    /// QR kodu kurulamıyorsa, örneğin veri fazla uzunsa, hata döndürür.
     pub fn with_error_correction_level<D: AsRef<[u8]>>(data: D, ec_level: EcLevel) -> QrResult<Self> {
         let bits = bits::encode_auto(data.as_ref(), ec_level)?;
         Self::with_bits(bits, ec_level)
     }
 
-    /// Constructs a new QR code for the given version and error correction
-    /// level.
+    /// Verilen sürüm ve hata düzeltme seviyesi için yeni bir QR kodu kurar.
     ///
     /// ```
     /// use qrcode::{EcLevel, QrCode, Version};
@@ -123,7 +120,7 @@ impl QrCode {
     /// let code = QrCode::with_version(b"Some data", Version::normal(5).unwrap(), EcLevel::M).unwrap();
     /// ```
     ///
-    /// This method can also be used to generate Micro QR code.
+    /// Bu metot Micro QR kodu üretmek için de kullanılabilir.
     ///
     /// ```
     /// use qrcode::{EcLevel, QrCode, Version};
@@ -133,9 +130,8 @@ impl QrCode {
     ///
     /// # Errors
     ///
-    /// Returns error if the QR code cannot be constructed, e.g. when the data
-    /// is too long, or when the version and error correction level are
-    /// incompatible.
+    /// QR kodu kurulamıyorsa, örneğin veri fazla uzunsa ya da sürüm ile hata
+    /// düzeltme seviyesi uyumsuzsa, hata döndürür.
     pub fn with_version<D: AsRef<[u8]>>(data: D, version: Version, ec_level: EcLevel) -> QrResult<Self> {
         let mut bits = bits::Bits::new(version);
         bits.push_optimal_data(data.as_ref())?;
@@ -143,16 +139,16 @@ impl QrCode {
         Self::with_bits(bits, ec_level)
     }
 
-    /// Constructs a new QR code with encoded bits.
+    /// Kodlanmış bitlerle yeni bir QR kodu kurar.
     ///
-    /// Use this method only if there are very special need to manipulate the
-    /// raw bits before encoding. Some examples are:
+    /// Bu metodu yalnızca kodlamadan önce ham bitleri değiştirmek için çok özel
+    /// bir ihtiyaç varsa kullanın. Bazı örnekler:
     ///
-    /// * Encode data using specific character set with ECI
-    /// * Use the FNC1 modes
-    /// * Avoid the optimal segmentation algorithm
+    /// * ECI ile belirli bir karakter kümesi kullanarak veri kodlamak
+    /// * FNC1 modlarını kullanmak
+    /// * En uygun bölümleme algoritmasından kaçınmak
     ///
-    /// See the `Bits` structure for detail.
+    /// Ayrıntı için `Bits` yapısına bakın.
     ///
     /// ```
     /// #![allow(unused_must_use)]
@@ -169,9 +165,8 @@ impl QrCode {
     ///
     /// # Errors
     ///
-    /// Returns error if the QR code cannot be constructed, e.g. when the bits
-    /// are too long, or when the version and error correction level are
-    /// incompatible.
+    /// QR kodu kurulamıyorsa, örneğin bitler fazla uzunsa ya da sürüm ile hata
+    /// düzeltme seviyesi uyumsuzsa, hata döndürür.
     pub fn with_bits(bits: bits::Bits, ec_level: EcLevel) -> QrResult<Self> {
         let version = bits.version();
         let data = bits.into_bytes();
@@ -183,35 +178,34 @@ impl QrCode {
         Ok(Self { content: canvas.into_colors(), version, ec_level, width: version.width().as_usize() })
     }
 
-    /// Gets the version of this QR code.
+    /// Bu QR kodunun sürümünü verir.
     pub const fn version(&self) -> Version {
         self.version
     }
 
-    /// Gets the error correction level of this QR code.
+    /// Bu QR kodunun hata düzeltme seviyesini verir.
     pub const fn error_correction_level(&self) -> EcLevel {
         self.ec_level
     }
 
-    /// Gets the number of modules per side, i.e. the width of this QR code.
+    /// Kenar başına modül sayısını, yani bu QR kodunun genişliğini verir.
     ///
-    /// The width here does not contain the quiet zone paddings.
+    /// Buradaki genişlik sessiz bölge dolgularını içermez.
     pub const fn width(&self) -> usize {
         self.width
     }
 
-    /// Gets the maximum number of allowed erratic modules can be introduced
-    /// before the data becomes corrupted. Note that errors should not be
-    /// introduced to functional modules.
+    /// Veri bozulmadan önce eklenebilecek en fazla hatalı modül sayısını verir.
+    /// Hataların işlevsel modüllere eklenmemesi gerektiğine dikkat edin.
     ///
-    /// A `QrCode` can only exist for a version and error correction level the
-    /// standard defines, so this lookup cannot fail.
+    /// Bir `QrCode` yalnızca standardın tanımladığı bir sürüm ve hata düzeltme
+    /// seviyesi için var olabilir, dolayısıyla bu arama başarısız olamaz.
     pub fn max_allowed_errors(&self) -> usize {
         ec::max_allowed_errors(self.version, self.ec_level).unwrap_or(0)
     }
 
-    /// Checks whether a module at coordinate (x, y) is a functional module or
-    /// not, or `None` if the coordinate lies outside the QR code.
+    /// (x, y) koordinatındaki modülün işlevsel bir modül olup olmadığını, ya da
+    /// koordinat QR kodunun dışındaysa `None` döndürür.
     pub fn get_functional(&self, x: usize, y: usize) -> Option<bool> {
         if x >= self.width || y >= self.width {
             return None;
@@ -219,64 +213,63 @@ impl QrCode {
         Some(canvas::is_functional(self.version, self.version.width(), x.as_i16(), y.as_i16()))
     }
 
-    /// Checks whether a module at coordinate (x, y) is a functional module or
-    /// not.
+    /// (x, y) koordinatındaki modülün işlevsel bir modül olup olmadığını kontrol
+    /// eder.
     ///
     /// # Panics
     ///
-    /// Panics if `x` or `y` is beyond the size of the QR code. Use
-    /// [`QrCode::get_functional`] for the checked form.
+    /// `x` ya da `y` QR kodunun boyutunu aşarsa panikler. Kontrollü biçim için
+    /// [`QrCode::get_functional`] kullanın.
     pub fn is_functional(&self, x: usize, y: usize) -> bool {
-        #[expect(clippy::expect_used, reason = "documented panic; get_functional is the checked form")]
-        self.get_functional(x, y).expect("coordinate is too large for QR code")
+        #[expect(clippy::expect_used, reason = "belgelenmiş panik; kontrollü biçim get_functional")]
+        self.get_functional(x, y).expect("koordinat QR kodu için fazla büyük")
     }
 
-    /// Gets the color of the module at coordinate (x, y), or `None` if the
-    /// coordinate lies outside the QR code.
+    /// (x, y) koordinatındaki modülün rengini, ya da koordinat QR kodunun
+    /// dışındaysa `None` döndürür.
     ///
-    /// This is the non-panicking counterpart of indexing with `code[(x, y)]`.
+    /// Bu, `code[(x, y)]` ile indekslemenin paniklemeyen karşılığıdır.
     pub fn get(&self, x: usize, y: usize) -> Option<Color> {
-        // Both bounds have to be checked up front: `y * self.width` overflows
-        // for a large `y` before the slice lookup ever gets a chance to fail.
+        // Her iki sınır da baştan kontrol edilmeli: büyük bir `y` için
+        // `y * self.width`, dilim aramasının başarısız olma şansı doğmadan taşar.
         if x >= self.width || y >= self.width {
             return None;
         }
         self.content.get(y * self.width + x).copied()
     }
 
-    /// Converts the QR code into a human-readable string. This is mainly for
-    /// debugging only.
+    /// QR kodunu insan tarafından okunabilir bir metne dönüştürür. Bu esas olarak
+    /// yalnızca hata ayıklama içindir.
     pub fn to_debug_str(&self, on_char: char, off_char: char) -> String {
         self.render().quiet_zone(false).dark_color(on_char).light_color(off_char).build()
     }
 
-    /// Converts the QR code to a vector of booleans. Each entry represents the
-    /// color of the module, with "true" means dark and "false" means light.
+    /// QR kodunu bir bool vektörüne dönüştürür. Her girdi modülün rengini temsil
+    /// eder; "true" koyu, "false" açık demektir.
     #[deprecated(since = "0.4.0", note = "use `to_colors()` instead")]
     pub fn to_vec(&self) -> Vec<bool> {
         self.content.iter().map(|c| *c != Color::Light).collect()
     }
 
-    /// Converts the QR code to a vector of booleans. Each entry represents the
-    /// color of the module, with "true" means dark and "false" means light.
+    /// QR kodunu bir bool vektörüne dönüştürür. Her girdi modülün rengini temsil
+    /// eder; "true" koyu, "false" açık demektir.
     #[deprecated(since = "0.4.0", note = "use `into_colors()` instead")]
     pub fn into_vec(self) -> Vec<bool> {
         self.content.into_iter().map(|c| c != Color::Light).collect()
     }
 
-    /// Converts the QR code to a vector of colors.
+    /// QR kodunu bir renk vektörüne dönüştürür.
     pub fn to_colors(&self) -> Vec<Color> {
         self.content.clone()
     }
 
-    /// Converts the QR code to a vector of colors.
+    /// QR kodunu bir renk vektörüne dönüştürür.
     pub fn into_colors(self) -> Vec<Color> {
         self.content
     }
 
-    /// Renders the QR code into an image. The result is an image builder, which
-    /// you may do some additional configuration before copying it into a
-    /// concrete image.
+    /// QR kodunu bir görüntüye çizer. Sonuç bir görüntü kurucusudur; somut bir
+    /// görüntüye kopyalamadan önce ek yapılandırma yapabilirsiniz.
     ///
     /// # Examples
     ///
@@ -290,15 +283,15 @@ impl QrCode {
     ///     .unwrap()
     ///     .render()
     ///     .dark_color(Rgb([0, 0, 128]))
-    ///     .light_color(Rgb([224, 224, 224])) // adjust colors
-    ///     .quiet_zone(false) // disable quiet zone (white border)
-    ///     .min_dimensions(300, 300) // sets minimum image size
+    ///     .light_color(Rgb([224, 224, 224])) // renkleri ayarla
+    ///     .quiet_zone(false) // sessiz bölgeyi kapat (beyaz kenarlık)
+    ///     .min_dimensions(300, 300) // en küçük görüntü boyutunu ayarlar
     ///     .build();
     /// # }
     /// ```
     ///
-    /// Note: the `image` crate itself also provides method to rotate the image,
-    /// or overlay a logo on top of the QR code.
+    /// Not: `image` crate'i görüntüyü döndürmek ya da QR kodunun üzerine logo
+    /// bindirmek için de metotlar sağlar.
     pub fn render<P: Pixel>(&self) -> Renderer<'_, P> {
         let quiet_zone = if self.version.is_micro() { 2 } else { 4 };
         Renderer::new(&self.content, self.width, quiet_zone)
@@ -308,16 +301,15 @@ impl QrCode {
 impl Index<(usize, usize)> for QrCode {
     type Output = Color;
 
-    /// Obtains the color of the module at coordinate (x, y).
+    /// (x, y) koordinatındaki modülün rengini verir.
     ///
     /// # Panics
     ///
-    /// Panics if `x` or `y` is beyond the size of the QR code. Without the
-    /// check on `x`, an out-of-range column would silently alias into a
-    /// neighbouring row instead.
+    /// `x` ya da `y` QR kodunun boyutunu aşarsa panikler. `x` üzerindeki kontrol
+    /// olmasa, aralık dışı bir sütun sessizce komşu bir satıra takma ad olurdu.
     fn index(&self, (x, y): (usize, usize)) -> &Color {
-        assert!(x < self.width && y < self.width, "coordinate is too large for QR code");
-        #[expect(clippy::indexing_slicing, reason = "bounds checked on the line above")]
+        assert!(x < self.width && y < self.width, "koordinat QR kodu için fazla büyük");
+        #[expect(clippy::indexing_slicing, reason = "sınırlar bir üstteki satırda kontrol edildi")]
         &self.content[y * self.width + x]
     }
 }
@@ -328,7 +320,7 @@ mod tests {
 
     #[test]
     fn test_annex_i_qr() {
-        // This uses the ISO Annex I as test vector.
+        // Bu, test vektörü olarak ISO Ek I'i kullanır.
         let code = QrCode::with_version(b"01234567", Version::normal(1).unwrap(), EcLevel::M).unwrap();
         assert_eq!(
             &*code.to_debug_str('#', '.'),
@@ -387,24 +379,24 @@ mod smoke_tests {
     use crate::{EcLevel, QrCode, Version};
     use alloc::vec::Vec;
 
-    /// Encoding must succeed -- and must not abort the process -- for every
-    /// version and error correction level the standard defines. Micro versions
-    /// M1 and M3 used to overflow while padding out their trailing half
-    /// codeword, taking down `QrCode::with_version` with them.
+    /// Kodlama, standardın tanımladığı her sürüm ve hata düzeltme seviyesi için
+    /// başarılı olmalı ve süreci abort etmemeli. Micro sürüm M1 ve M3, sondaki
+    /// yarım kod kelimesini doldururken taşıyor ve `QrCode::with_version`'ı da
+    /// kendileriyle birlikte çökertiyordu.
     #[test]
     fn test_every_version_and_ec_level() {
         for version in all_versions() {
-            // Only the Micro versions hold a non-multiple of 8 data bits, so
-            // they are the ones where the terminator offset can land inside a
-            // half codeword. Sweeping every length there is what matters; the
-            // Normal versions only need one encode each to stay quick.
+            // Yalnızca Micro sürümler 8'in katı olmayan sayıda veri biti tutar, bu yüzden
+            // sonlandırıcı ofsetinin bir yarım kod kelimesinin içine düşebileceği yerler
+            // onlardır. Asıl önemli olan orada her uzunluğu taramak; Normal sürümler hızlı
+            // kalmak için her biri tek bir kodlamayla yetinir.
             let lengths = if version.is_micro() { 0..24 } else { 0..1 };
 
             for ec_level in [EcLevel::L, EcLevel::M, EcLevel::Q, EcLevel::H] {
                 for length in lengths.clone() {
                     let digits = b"0123456789".iter().copied().cycle().take(length).collect::<Vec<u8>>();
                     let Ok(code) = QrCode::with_version(&digits, version, ec_level) else {
-                        continue; // invalid combination, or the data does not fit
+                        continue; // geçersiz bileşim ya da veri sığmıyor
                     };
                     assert_eq!(code.width(), version.width().as_usize(), "{version:?} {ec_level:?} {length}");
                     assert_eq!(code.to_colors().len(), code.width() * code.width());
@@ -414,16 +406,16 @@ mod smoke_tests {
     }
 
     #[test]
-    #[should_panic(expected = "coordinate is too large")]
+    #[should_panic(expected = "koordinat QR kodu için fazla büyük")]
     fn test_index_out_of_range_column() {
-        // 25 is a valid *index* into a 21x21 code's backing store, but not a
-        // valid column: it used to silently alias into the next row.
+        // 25, 21x21 bir kodun arka deposunda geçerli bir *indekstir* ama geçerli bir
+        // sütun değildir: eskiden sessizce sonraki satıra takma ad oluyordu.
         let code = QrCode::with_version(b"01234567", Version::normal(1).unwrap(), EcLevel::M).unwrap();
         let _ = code[(25, 0)];
     }
 
     #[test]
-    #[should_panic(expected = "coordinate is too large")]
+    #[should_panic(expected = "koordinat QR kodu için fazla büyük")]
     fn test_is_functional_out_of_range() {
         let code = QrCode::with_version(b"01234567", Version::normal(1).unwrap(), EcLevel::M).unwrap();
         let _ = code.is_functional(21, 0);

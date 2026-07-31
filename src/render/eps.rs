@@ -1,4 +1,4 @@
-//! EPS rendering support.
+//! EPS çizim desteği.
 //!
 //! # Example
 //!
@@ -19,9 +19,9 @@ use core::fmt::Write;
 use crate::render::{Canvas as RenderCanvas, Pixel};
 use crate::types::Color as ModuleColor;
 
-/// An EPS color (`[R, G, B]`).
+/// Bir EPS rengi (`[R, G, B]`).
 ///
-/// Each value must be in the range of 0.0 to 1.0.
+/// Her değer 0.0 ile 1.0 aralığında olmalıdır.
 #[derive(Copy, Clone, Default, PartialEq, PartialOrd)]
 pub struct Color(pub [f64; 3]);
 
@@ -76,11 +76,11 @@ impl RenderCanvas for Canvas {
     }
 
     fn draw_dark_rect(&mut self, left: u32, top: u32, width: u32, height: u32) {
-        // PostScript's origin is at the bottom-left and `rectfill` takes the
-        // lower-left corner, so the whole rectangle -- not just its top edge --
-        // has to be flipped, otherwise the image is shifted up by `height`.
+        // PostScript'in başlangıç noktası sol alttadır ve `rectfill` sol alt köşeyi
+        // alır; bu yüzden yalnızca üst kenarın değil dikdörtgenin tamamının
+        // çevrilmesi gerekir, aksi hâlde görüntü `height` kadar yukarı kayar.
         let bottom = self.height - top - height;
-        // Writing into a `String` is infallible.
+        // Bir `String`'e yazmak hatasızdır.
         let _ = writeln!(self.eps, "{left} {bottom} {width} {height} rectfill");
     }
 

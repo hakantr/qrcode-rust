@@ -1,4 +1,4 @@
-//! String rendering support.
+//! Karakter dizisi çizim desteği.
 
 use crate::cast::As;
 use crate::render::{Canvas as RenderCanvas, Pixel};
@@ -8,15 +8,15 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-/// Abstraction of an image element.
+/// Bir görüntü öğesinin soyutlaması.
 pub trait Element: Copy {
-    /// Obtains the default element color when a module is dark or light.
+    /// Modül koyu ya da açık olduğunda varsayılan öğe rengini verir.
     fn default_color(color: Color) -> Self;
 
-    /// Returns the number of bytes in `self`.
+    /// `self` içindeki bayt sayısını döndürür.
     fn strlen(self) -> usize;
 
-    /// Appends `self` to the end of the given `string`.
+    /// `self`'i verilen `string`'in sonuna ekler.
     fn append_to_string(self, string: &mut String);
 }
 
@@ -83,16 +83,22 @@ impl<P: Element> RenderCanvas for Canvas<P> {
             buffer: vec![light_pixel; width.saturating_mul(height)],
             width,
             dark_pixel,
-            // A dark element may be shorter than a light one, so the running
-            // adjustment is signed even though the total never goes below zero.
-            dark_cap_inc: dark_cap.as_isize() - light_cap.as_isize(),
-            // One newline between each pair of rows; an empty image has none,
-            // which used to underflow this to -1.
+            // Koyu bir öğe açık olandan kısa olabilir, bu yüzden toplam hiçbir zaman
+            // sıfırın altına inmese de yürüyen düzeltme işaretlidir. Her iki uzunluk
+            // da ayrılmış bir dilimden gelir, yani `isize::MAX`'ı aşamazlar.
+            dark_cap_inc: isize::try_from(dark_cap).unwrap_or(isize::MAX)
+                - isize::try_from(light_cap).unwrap_or(isize::MAX),
+            // Her satır çifti arasında bir satır sonu; boş bir görüntüde hiç yoktur ve
+            // bu değer eskiden -1'e taşıyordu.
+            //
+            // Bu yalnızca `String::with_capacity` için bir ipucudur, doğruluğu
+            // etkilemez; bu yüzden taşırmak yerine kırpılır.
             capacity: light_cap
                 .saturating_mul(width)
                 .saturating_mul(height)
                 .saturating_add(height.saturating_sub(1))
-                .as_isize(),
+                .try_into()
+                .unwrap_or(isize::MAX),
         }
     }
 
@@ -106,9 +112,9 @@ impl<P: Element> RenderCanvas for Canvas<P> {
     }
 
     fn into_image(self) -> String {
-        // `dark_cap_inc` is negative when the dark element is the shorter one,
-        // so the running total can dip below zero before the last pixel.
-        let mut result = String::with_capacity(self.capacity.max(0).as_usize());
+        // Koyu öğe kısa olan olduğunda `dark_cap_inc` negatiftir, yani yürüyen
+        // toplam son pikselden önce sıfırın altına düşebilir.
+        let mut result = String::with_capacity(usize::try_from(self.capacity).unwrap_or(0));
         for (i, pixel) in self.buffer.into_iter().enumerate() {
             if i != 0 && i % self.width == 0 {
                 result.push('\n');

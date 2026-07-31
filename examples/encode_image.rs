@@ -1,17 +1,17 @@
-// Examples unwrap to keep the demo short; library code may not -- see the
-// [lints.clippy] gate in Cargo.toml.
-#![allow(clippy::unwrap_used, reason = "example code")]
+// Örnekler demoyu kısa tutmak için unwrap kullanır; kütüphane kodu kullanamaz --
+// bkz. Cargo.toml'daki [lints.clippy] kapısı.
+#![allow(clippy::unwrap_used, reason = "örnek kod")]
 
 use image::Luma;
 use qrcode::QrCode;
 
 fn main() {
-    // Encode some data into bits.
+    // Bir miktar veriyi bitlere kodla.
     let code = QrCode::new(b"01234567").unwrap();
 
-    // Render the bits into an image.
+    // Bitleri bir görüntüye çiz.
     let image = code.render::<Luma<u8>>().build();
 
-    // Save the image.
+    // Görüntüyü kaydet.
     image.save("/tmp/qrcode.png").unwrap();
 }

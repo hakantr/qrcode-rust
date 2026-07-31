@@ -1,4 +1,4 @@
-//! The `canvas` module puts raw bits into the QR code canvas.
+//! `canvas` modülü ham bitleri QR kodu tuvaline yerleştirir.
 //!
 //! ```
 //! use qrcode::canvas::{Canvas, MaskPattern};
@@ -22,17 +22,17 @@ use crate::types::{Color, EcLevel, QrError, QrResult, Version, VersionKind};
 //------------------------------------------------------------------------------
 //{{{ Modules
 
-/// The color of a module (pixel) in the QR code.
+/// QR kodundaki bir modülün (pikselin) rengi.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Module {
-    /// The module is empty.
+    /// Modül boş.
     Empty,
 
-    /// The module is of functional patterns which cannot be masked, or pixels
-    /// which have been masked.
+    /// Modül, maskelenemeyen işlevsel desenlere ait ya da maskelenmiş piksellere
+    /// aittir.
     Masked(Color),
 
-    /// The module is of data and error correction bits before masking.
+    /// Modül, maskelemeden önceki veri ve hata düzeltme bitlerine aittir.
     Unmasked(Color),
 }
 
@@ -46,12 +46,12 @@ impl From<Module> for Color {
 }
 
 impl Module {
-    /// Checks whether a module is dark.
+    /// Bir modülün koyu olup olmadığını kontrol eder.
     pub fn is_dark(self) -> bool {
         Color::from(self) == Color::Dark
     }
 
-    /// Apply a mask to the unmasked modules.
+    /// Maskelenmemiş modüllere bir maske uygular.
     ///
     /// ```
     /// use qrcode::canvas::Module;
@@ -78,32 +78,32 @@ impl Module {
 //------------------------------------------------------------------------------
 //{{{ Canvas
 
-/// `Canvas` is an intermediate helper structure to render error-corrected data
-/// into a QR code.
+/// `Canvas`, hata düzeltmesi yapılmış veriyi bir QR koduna çizmek için
+/// kullanılan ara yardımcı yapıdır.
 #[derive(Clone)]
 pub struct Canvas {
-    /// The width and height of the canvas (cached as it is needed frequently).
+    /// Tuvalin genişliği ve yüksekliği (sık gerektiği için önbelleklenmiştir).
     width: i16,
 
-    /// The version of the QR code.
+    /// QR kodunun sürümü.
     version: Version,
 
-    /// The error correction level of the QR code.
+    /// QR kodunun hata düzeltme seviyesi.
     ec_level: EcLevel,
 
-    /// The modules of the QR code. Modules are arranged in left-to-right, then
-    /// top-to-bottom order.
+    /// QR kodunun modülleri. Modüller soldan sağa, sonra yukarıdan aşağıya
+    /// sıralanmıştır.
     modules: Vec<Module>,
 }
 
 impl Canvas {
-    /// Constructs a new canvas big enough for a QR code of the given version.
+    /// Verilen sürümdeki bir QR kodu için yeterince büyük yeni bir tuval kurar.
     pub fn new(version: Version, ec_level: EcLevel) -> Self {
         let width = version.width();
         Self { width, version, ec_level, modules: vec![Module::Empty; (width * width).as_usize()] }
     }
 
-    /// Converts the canvas into a human-readable string.
+    /// Tuvali insan tarafından okunabilir bir metne dönüştürür.
     #[cfg(test)]
     fn to_debug_str(&self) -> alloc::string::String {
         let width = self.width;
@@ -123,9 +123,9 @@ impl Canvas {
         res
     }
 
-    /// Maps a coordinate pair onto an index into `self.modules`, or `None` if
-    /// it falls outside the symbol. Negative coordinates wrap around, so the
-    /// accepted range is `-width..width` on both axes.
+    /// Bir koordinat çiftini `self.modules` içindeki bir indekse, sembolün
+    /// dışına düşüyorsa `None`'a eşler. Negatif koordinatlar başa sarar, yani
+    /// kabul edilen aralık her iki eksende `-width..width`'tir.
     fn coords_to_index(&self, x: i16, y: i16) -> Option<usize> {
         let normalise = |v: i16| match v {
             _ if v >= self.width => None,
@@ -135,56 +135,55 @@ impl Canvas {
         };
         let x = normalise(x)?;
         let y = normalise(y)?;
-        // width <= 177, so this is at most 31328 and cannot overflow.
+        // width <= 177, yani bu en fazla 31328'dir ve taşamaz.
         Some(y * self.width.as_usize() + x)
     }
 
-    /// Obtains a module at the given coordinates, or `None` if the coordinates
-    /// fall outside the symbol. For convenience, negative coordinates will wrap
-    /// around.
+    /// Verilen koordinattaki modülü, koordinatlar sembolün dışına düşüyorsa
+    /// `None` döndürür. Kolaylık olsun diye negatif koordinatlar başa sarar.
     pub fn get_module(&self, x: i16, y: i16) -> Option<Module> {
         self.modules.get(self.coords_to_index(x, y)?).copied()
     }
 
-    /// Obtains a mutable module at the given coordinates, or `None` if the
-    /// coordinates fall outside the symbol. For convenience, negative
-    /// coordinates will wrap around.
+    /// Verilen koordinattaki değiştirilebilir modülü, koordinatlar sembolün
+    /// dışına düşüyorsa `None` döndürür. Kolaylık olsun diye negatif koordinatlar
+    /// başa sarar.
     pub fn get_module_mut(&mut self, x: i16, y: i16) -> Option<&mut Module> {
         let index = self.coords_to_index(x, y)?;
         self.modules.get_mut(index)
     }
 
-    /// Obtains a module at the given coordinates. For convenience, negative
-    /// coordinates will wrap around.
+    /// Verilen koordinattaki modülü verir. Kolaylık olsun diye negatif
+    /// koordinatlar başa sarar.
     ///
     /// # Panics
     ///
-    /// Panics if the coordinates fall outside the symbol. Use
-    /// [`Canvas::get_module`] for the checked form.
+    /// Koordinatlar sembolün dışına düşerse panikler. Kontrollü biçim için
+    /// [`Canvas::get_module`] kullanın.
     pub fn get(&self, x: i16, y: i16) -> Module {
-        #[expect(clippy::expect_used, reason = "documented panic; get_module is the checked form")]
-        self.get_module(x, y).expect("coordinate out of range")
+        #[expect(clippy::expect_used, reason = "belgelenmiş panik; kontrollü biçim get_module")]
+        self.get_module(x, y).expect("koordinat aralık dışı")
     }
 
-    /// Obtains a mutable module at the given coordinates. For convenience,
-    /// negative coordinates will wrap around.
+    /// Verilen koordinattaki değiştirilebilir modülü verir. Kolaylık olsun diye
+    /// negatif koordinatlar başa sarar.
     ///
     /// # Panics
     ///
-    /// Panics if the coordinates fall outside the symbol. Use
-    /// [`Canvas::get_module_mut`] for the checked form.
+    /// Koordinatlar sembolün dışına düşerse panikler. Kontrollü biçim için
+    /// [`Canvas::get_module_mut`] kullanın.
     pub fn get_mut(&mut self, x: i16, y: i16) -> &mut Module {
-        #[expect(clippy::expect_used, reason = "documented panic; get_module_mut is the checked form")]
-        self.get_module_mut(x, y).expect("coordinate out of range")
+        #[expect(clippy::expect_used, reason = "belgelenmiş panik; kontrollü biçim get_module_mut")]
+        self.get_module_mut(x, y).expect("koordinat aralık dışı")
     }
 
-    /// Sets the color of a functional module at the given coordinates. For
-    /// convenience, negative coordinates will wrap around.
+    /// Verilen koordinattaki işlevsel modülün rengini ayarlar. Kolaylık olsun
+    /// diye negatif koordinatlar başa sarar.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::CoordinateOutOfRange)` if the coordinates fall
-    /// outside the symbol, leaving the canvas untouched.
+    /// Koordinatlar sembolün dışına düşerse tuvale dokunmadan
+    /// `Err(QrError::CoordinateOutOfRange)` döndürür.
     pub fn try_put(&mut self, x: i16, y: i16, color: Color) -> QrResult<()> {
         match self.get_module_mut(x, y) {
             Some(module) => {
@@ -195,13 +194,13 @@ impl Canvas {
         }
     }
 
-    /// Sets the color of a functional module at the given coordinates. For
-    /// convenience, negative coordinates will wrap around.
+    /// Verilen koordinattaki işlevsel modülün rengini ayarlar. Kolaylık olsun
+    /// diye negatif koordinatlar başa sarar.
     ///
     /// # Panics
     ///
-    /// Panics if the coordinates fall outside the symbol. Use
-    /// [`Canvas::try_put`] for the checked form.
+    /// Koordinatlar sembolün dışına düşerse panikler. Kontrollü biçim için
+    /// [`Canvas::try_put`] kullanın.
     pub fn put(&mut self, x: i16, y: i16, color: Color) {
         *self.get_mut(x, y) = Module::Masked(color);
     }
@@ -277,7 +276,7 @@ mod basic_canvas_tests {
 //{{{ Finder patterns
 
 impl Canvas {
-    /// Draws a single finder pattern with the center at (x, y).
+    /// Merkezi (x, y) olan tek bir bulucu deseni çizer.
     fn draw_finder_pattern_at(&mut self, x: i16, y: i16) {
         let (dx_left, dx_right) = if x >= 0 { (-3, 4) } else { (-4, 3) };
         let (dy_top, dy_bottom) = if y >= 0 { (-3, 4) } else { (-4, 3) };
@@ -297,11 +296,10 @@ impl Canvas {
         }
     }
 
-    /// Draws the finder patterns.
+    /// Bulucu desenlerini çizer.
     ///
-    /// The finder patterns is are 7×7 square patterns appearing at the three
-    /// corners of a QR code. They allows scanner to locate the QR code and
-    /// determine the orientation.
+    /// Bulucu desenleri bir QR kodunun üç köşesinde görünen 7×7 kare desenlerdir.
+    /// Tarayıcının QR kodunu bulmasını ve yönelimi belirlemesini sağlarlar.
     fn draw_finder_patterns(&mut self) {
         self.draw_finder_pattern_at(3, 3);
 
@@ -378,7 +376,7 @@ mod finder_pattern_tests {
 //{{{ Alignment patterns
 
 impl Canvas {
-    /// Draws a alignment pattern with the center at (x, y).
+    /// Merkezi (x, y) olan bir hizalama deseni çizer.
     fn draw_alignment_pattern_at(&mut self, x: i16, y: i16) {
         if self.get(x, y) != Module::Empty {
             return;
@@ -397,17 +395,17 @@ impl Canvas {
         }
     }
 
-    /// Draws the alignment patterns.
+    /// Hizalama desenlerini çizer.
     ///
-    /// The alignment patterns are 5×5 square patterns inside the QR code symbol
-    /// to help the scanner create the square grid.
+    /// Hizalama desenleri, tarayıcının kare ızgarayı oluşturmasına yardımcı olmak
+    /// için QR kodu sembolünün içindeki 5×5 kare desenlerdir.
     fn draw_alignment_patterns(&mut self) {
         match self.version.kind() {
             VersionKind::Micro(_) | VersionKind::Normal(1) => {}
             VersionKind::Normal(2..=6) => self.draw_alignment_pattern_at(-7, -7),
             VersionKind::Normal(a) => {
-                // `a` is 7..=40 here, so the index is 0..=33 and the table has
-                // 34 rows; an empty fallback keeps this total either way.
+                // `a` burada 7..=40 aralığındadır, yani indeks 0..=33 ve tablonun 34 satırı
+                // var; boş bir yedek bunu her hâlükârda total tutar.
                 let positions = ALIGNMENT_PATTERN_POSITIONS.get((a - 7).as_usize()).copied().unwrap_or(&[]);
                 for x in positions {
                     for y in positions {
@@ -553,9 +551,9 @@ mod alignment_pattern_tests {
     }
 }
 
-/// `ALIGNMENT_PATTERN_POSITIONS` describes the x- and y-coordinates of the
-/// center of the alignment patterns. Since the QR code is symmetric, only one
-/// coordinate is needed.
+/// `ALIGNMENT_PATTERN_POSITIONS`, hizalama desenlerinin merkezinin x ve y
+/// koordinatlarını tanımlar. QR kodu simetrik olduğundan yalnızca tek bir
+/// koordinat yeterlidir.
 static ALIGNMENT_PATTERN_POSITIONS: [&[i16]; 34] = [
     &[6, 22, 38],
     &[6, 24, 42],
@@ -598,36 +596,34 @@ static ALIGNMENT_PATTERN_POSITIONS: [&[i16]; 34] = [
 //{{{ Timing patterns
 
 impl Canvas {
-    /// Draws a line from (x1, y1) to (x2, y2), inclusively.
+    /// (x1, y1)'den (x2, y2)'ye, uçlar dahil bir çizgi çizer.
     ///
-    /// The line must be either horizontal or vertical, i.e.
-    /// `x1 == x2 || y1 == y2`. Additionally, the first coordinates must be less
-    /// then the second ones.
+    /// Çizgi ya yatay ya da dikey olmalıdır; yani `x1 == x2 || y1 == y2`.
+    /// Ayrıca ilk koordinatlar ikincilerden küçük olmalıdır.
     ///
-    /// On even coordinates, `color_even` will be plotted; on odd coordinates,
-    /// `color_odd` will be plotted instead. Thus the timing pattern can be
-    /// drawn using this method.
+    /// Çift koordinatlarda `color_even`, tek koordinatlarda ise `color_odd`
+    /// çizilir. Zamanlama deseni böylece bu metotla çizilebilir.
     fn draw_line(&mut self, x1: i16, y1: i16, x2: i16, y2: i16, color_even: Color, color_odd: Color) {
         debug_assert!(x1 == x2 || y1 == y2);
 
         if y1 == y2 {
-            // Horizontal line.
+            // Yatay çizgi.
             for x in x1..=x2 {
                 self.put(x, y1, if x % 2 == 0 { color_even } else { color_odd });
             }
         } else {
-            // Vertical line.
+            // Dikey çizgi.
             for y in y1..=y2 {
                 self.put(x1, y, if y % 2 == 0 { color_even } else { color_odd });
             }
         }
     }
 
-    /// Draws the timing patterns.
+    /// Zamanlama desenlerini çizer.
     ///
-    /// The timing patterns are checkboard-colored lines near the edge of the QR
-    /// code symbol, to establish the fine-grained module coordinates when
-    /// scanning.
+    /// Zamanlama desenleri, tarama sırasında ince taneli modül koordinatlarını
+    /// belirlemek için QR kodu sembolünün kenarına yakın, dama tahtası renkli
+    /// çizgilerdir.
     fn draw_timing_patterns(&mut self) {
         let width = self.width;
         let (y, x1, x2) = match self.version.kind() {
@@ -702,12 +698,11 @@ mod timing_pattern_tests {
 //{{{ Format info & Version info
 
 impl Canvas {
-    /// Draws a big-endian integer onto the canvas with the given coordinates.
+    /// Verilen koordinatlarla tuvale büyük-endian bir tam sayı çizer.
     ///
-    /// The 1 bits will be plotted with `on_color` and the 0 bits with
-    /// `off_color`. The coordinates will be extracted from the `coords`
-    /// iterator. It will start from the most significant bits first, so
-    /// *trailing* zeros will be ignored.
+    /// 1 bitleri `on_color`, 0 bitleri `off_color` ile çizilir. Koordinatlar
+    /// `coords` yineleyicisinden alınır. En anlamlı bitten başlar, dolayısıyla
+    /// *sondaki* sıfırlar yok sayılır.
     fn draw_number(&mut self, number: u32, bits: u32, on_color: Color, off_color: Color, coords: &[(i16, i16)]) {
         let mut mask = 1 << (bits - 1);
         for &(x, y) in coords {
@@ -717,7 +712,7 @@ impl Canvas {
         }
     }
 
-    /// Draws the format info patterns for an encoded number.
+    /// Kodlanmış bir sayı için biçim bilgisi desenlerini çizer.
     fn draw_format_info_patterns_with_number(&mut self, format_info: u16) {
         let format_info = u32::from(format_info);
         match self.version.kind() {
@@ -727,22 +722,22 @@ impl Canvas {
             VersionKind::Normal(_) => {
                 self.draw_number(format_info, 15, Color::Dark, Color::Light, &FORMAT_INFO_COORDS_QR_MAIN);
                 self.draw_number(format_info, 15, Color::Dark, Color::Light, &FORMAT_INFO_COORDS_QR_SIDE);
-                self.put(8, -8, Color::Dark); // Dark module.
+                self.put(8, -8, Color::Dark); // Koyu modül.
             }
         }
     }
 
-    /// Reserves area to put in the format information.
+    /// Biçim bilgisinin yerleştirileceği alanı ayırır.
     fn draw_reserved_format_info_patterns(&mut self) {
         self.draw_format_info_patterns_with_number(0);
     }
 
-    /// Draws the version information patterns.
+    /// Sürüm bilgisi desenlerini çizer.
     fn draw_version_info_patterns(&mut self) {
         match self.version.kind() {
             VersionKind::Micro(_) | VersionKind::Normal(1..=6) => {}
             VersionKind::Normal(a) => {
-                // `a` is 7..=40 here, so the index is 0..=33 into a 34-entry table.
+                // `a` burada 7..=40 aralığındadır, yani 34 girdilik tabloya indeks 0..=33'tür.
                 let Some(&version_info) = VERSION_INFOS.get((a - 7).as_usize()) else { return };
                 self.draw_number(version_info, 18, Color::Dark, Color::Light, &VERSION_INFO_COORDS_BL);
                 self.draw_number(version_info, 18, Color::Dark, Color::Light, &VERSION_INFO_COORDS_TR);
@@ -1024,12 +1019,11 @@ static VERSION_INFOS: [u32; 34] = [
 //{{{ All functional patterns before data placement
 
 impl Canvas {
-    /// Draw all functional patterns, before data placement.
+    /// Veri yerleşiminden önce tüm işlevsel desenleri çizer.
     ///
-    /// All functional patterns (e.g. the finder pattern) *except* the format
-    /// info pattern will be filled in. The format info pattern will be filled
-    /// with light modules instead. Data bits can then put in the empty modules.
-    /// with `.draw_data()`.
+    /// Biçim bilgisi deseni *hariç* tüm işlevsel desenler (ör. bulucu deseni)
+    /// doldurulur. Biçim bilgisi deseni bunun yerine açık modüllerle doldurulur.
+    /// Veri bitleri daha sonra `.draw_data()` ile boş modüllere yerleştirilebilir.
     pub fn draw_all_functional_patterns(&mut self) {
         self.draw_finder_patterns();
         self.draw_alignment_patterns();
@@ -1039,8 +1033,8 @@ impl Canvas {
     }
 }
 
-/// Gets whether the module at the given coordinates represents a functional
-/// module.
+/// Verilen koordinattaki modülün işlevsel bir modülü temsil edip etmediğini
+/// verir.
 pub fn is_functional(version: Version, width: i16, x: i16, y: i16) -> bool {
     debug_assert_eq!(width, version.width());
 
@@ -1050,16 +1044,16 @@ pub fn is_functional(version: Version, width: i16, x: i16, y: i16) -> bool {
     match version.kind() {
         VersionKind::Micro(_) => x == 0 || y == 0 || (x < 9 && y < 9),
         VersionKind::Normal(a) => {
-            // The version information blocks are 6×3 areas next to the
-            // bottom-left and top-right finder patterns, present from version 7
-            // onwards. See `VERSION_INFO_COORDS_BL` / `VERSION_INFO_COORDS_TR`.
+            // Sürüm bilgisi blokları, sol alt ve sağ üst bulucu desenlerinin yanındaki
+            // 6×3 alanlardır ve sürüm 7'den itibaren bulunurlar. Bkz.
+            // `VERSION_INFO_COORDS_BL` / `VERSION_INFO_COORDS_TR`.
             let version_info_test = a >= 7
                 && ((x < 6 && (width - 11..=width - 9).contains(&y))
                     || (y < 6 && (width - 11..=width - 9).contains(&x)));
-            let non_alignment_test = x == 6 || y == 6 || // Timing patterns
-                    (x < 9 && y < 9) ||                  // Top-left finder pattern
-                    (x < 9 && y >= width-8) ||           // Bottom-left finder pattern
-                    (x >= width-8 && y < 9) ||           // Top-right finder pattern
+            let non_alignment_test = x == 6 || y == 6 || // Zamanlama desenleri
+                    (x < 9 && y < 9) ||                  // Sol üst bulucu deseni
+                    (x < 9 && y >= width-8) ||           // Sol alt bulucu deseni
+                    (x >= width-8 && y < 9) ||           // Sağ üst bulucu deseni
                     version_info_test;
             match a {
                 _ if non_alignment_test => true,
@@ -1181,14 +1175,14 @@ mod all_functional_patterns_tests {
         assert!(!is_functional(version, version.width(), 19, 5));
         assert!(is_functional(version, version.width(), 38, 38));
 
-        // The 6×3 version information blocks, drawn from version 7 onwards.
-        // These used to be misreported as ordinary data modules.
+        // Sürüm 7'den itibaren çizilen 6×3 sürüm bilgisi blokları. Bunlar eskiden
+        // sıradan veri modülü olarak yanlış bildiriliyordu.
         assert!(is_functional(version, version.width(), 36, 3));
         assert!(is_functional(version, version.width(), 4, 36));
         assert!(is_functional(version, version.width(), 34, 0));
         assert!(is_functional(version, version.width(), 0, 34));
-        assert!(!is_functional(version, version.width(), 33, 3)); // just left of the block
-        assert!(!is_functional(version, version.width(), 3, 33)); // just above the block
+        assert!(!is_functional(version, version.width(), 33, 3)); // bloğun hemen solu
+        assert!(!is_functional(version, version.width(), 3, 33)); // bloğun hemen üstü
     }
 
     #[test]
@@ -1263,7 +1257,7 @@ impl Iterator for DataModuleIter {
 }
 
 #[cfg(test)]
-#[rustfmt::skip] // skip to prevent file becoming too long.
+#[rustfmt::skip] // dosya fazla uzamasın diye atlanıyor.
 mod data_iter_tests {
     use crate::canvas::DataModuleIter;
     use crate::types::Version;
@@ -1457,12 +1451,12 @@ impl Canvas {
         }
     }
 
-    /// Draws the encoded data and error correction codes to the empty modules.
+    /// Kodlanmış veriyi ve hata düzeltme kodlarını boş modüllere çizer.
     pub fn draw_data(&mut self, data: &[u8], ec: &[u8]) {
-        // ISO/IEC 18004:2006 §6.4.10 Table 7: the M1 and M3 symbols hold a
-        // non-multiple of 8 data bits (20, and 84/68), so their final data
-        // codeword is only 4 bits wide. This holds for *both* error correction
-        // levels of M3, not just `M`.
+        // ISO/IEC 18004:2006 Tablo 7 §6.4.10: M1 ve M3 sembolleri 8'in katı olmayan
+        // sayıda veri biti (20 ve 84/68) tutar, yani son veri kod kelimeleri yalnızca
+        // 4 bit genişliğindedir. Bu, yalnızca `M` için değil, M3'ün *her iki* hata
+        // düzeltme seviyesi için geçerlidir.
         let is_half_codeword_at_end = matches!(self.version.kind(), VersionKind::Micro(1 | 3));
         let mut coords = DataModuleIter::new(self.version);
         self.draw_codewords(data, is_half_codeword_at_end, &mut coords);
@@ -1497,12 +1491,13 @@ mod draw_codewords_test {
         );
     }
 
-    /// The codewords produced for a symbol must occupy exactly the modules the
-    /// placement iterator visits: one bit too many silently drops the tail of
-    /// the error correction data, one bit too few leaves modules empty.
+    /// Bir sembol için üretilen kod kelimeleri, yerleştirme yineleyicisinin
+    /// ziyaret ettiği modülleri tam olarak doldurmalıdır: bir bit fazlası hata
+    /// düzeltme verisinin kuyruğunu sessizce düşürür, bir bit eksiği modülleri
+    /// boş bırakır.
     ///
-    /// This is what caught M3-L being drawn with a full trailing data codeword
-    /// instead of the 4-bit one required by ISO/IEC 18004:2006 §6.4.10.
+    /// M3-L'nin, ISO/IEC 18004:2006 §6.4.10'un gerektirdiği 4 bitlik kod kelimesi
+    /// yerine tam bir sondaki veri kod kelimesiyle çizildiğini yakalayan da budur.
     #[test]
     fn test_codeword_bits_match_module_count() {
         use crate::bits::{Bits, all_versions};
@@ -1514,7 +1509,7 @@ mod draw_codewords_test {
             for ec_level in [EcLevel::L, EcLevel::M, EcLevel::Q, EcLevel::H] {
                 let mut bits = Bits::new(version);
                 let Ok(()) = bits.push_terminator(ec_level) else {
-                    continue; // invalid version / ec level combination
+                    continue; // geçersiz sürüm / ec seviyesi bileşimi
                 };
                 let Ok((data, ec)) = construct_codewords(&bits.into_bytes(), version, ec_level) else {
                     continue;
@@ -1526,8 +1521,8 @@ mod draw_codewords_test {
                 let modules_count =
                     DataModuleIter::new(version).filter(|&(x, y)| !is_functional(version, width, x, y)).count();
 
-                // The leftovers are the "remainder bits" of ISO/IEC 18004:2006
-                // §6.7.2, Table 1, which are left unused by design.
+                // Artakalanlar, ISO/IEC 18004:2006 §6.7.2, Tablo 1'deki, tasarım gereği
+                // kullanılmadan bırakılan "kalan bitler"dir.
                 let remainder_bits = match version.kind() {
                     VersionKind::Normal(2..=6) => 7,
                     VersionKind::Normal(14..=20 | 28..=34) => 3,
@@ -1583,32 +1578,32 @@ mod draw_codewords_test {
 //------------------------------------------------------------------------------
 //{{{ Masking
 
-/// The mask patterns. Since QR code and Micro QR code do not use the same
-/// pattern number, we name them according to their shape instead of the number.
+/// Maske desenleri. QR kodu ve Micro QR kodu aynı desen numarasını
+/// kullanmadığından, onları numaraya göre değil şekle göre adlandırıyoruz.
 #[derive(Debug, Copy, Clone)]
 pub enum MaskPattern {
-    /// QR code pattern 000: `(x + y) % 2 == 0`.
+    /// QR kodu deseni 000: `(x + y) % 2 == 0`.
     Checkerboard = 0b000,
 
-    /// QR code pattern 001: `y % 2 == 0`.
+    /// QR kodu deseni 001: `y % 2 == 0`.
     HorizontalLines = 0b001,
 
-    /// QR code pattern 010: `x % 3 == 0`.
+    /// QR kodu deseni 010: `x % 3 == 0`.
     VerticalLines = 0b010,
 
-    /// QR code pattern 011: `(x + y) % 3 == 0`.
+    /// QR kodu deseni 011: `(x + y) % 3 == 0`.
     DiagonalLines = 0b011,
 
-    /// QR code pattern 100: `((x/3) + (y/2)) % 2 == 0`.
+    /// QR kodu deseni 100: `((x/3) + (y/2)) % 2 == 0`.
     LargeCheckerboard = 0b100,
 
-    /// QR code pattern 101: `(x*y)%2 + (x*y)%3 == 0`.
+    /// QR kodu deseni 101: `(x*y)%2 + (x*y)%3 == 0`.
     Fields = 0b101,
 
-    /// QR code pattern 110: `((x*y)%2 + (x*y)%3) % 2 == 0`.
+    /// QR kodu deseni 110: `((x*y)%2 + (x*y)%3) % 2 == 0`.
     Diamonds = 0b110,
 
-    /// QR code pattern 111: `((x+y)%2 + (x*y)%3) % 2 == 0`.
+    /// QR kodu deseni 111: `((x+y)%2 + (x*y)%3) % 2 == 0`.
     Meadow = 0b111,
 }
 
@@ -1653,32 +1648,31 @@ fn get_mask_function(pattern: MaskPattern) -> fn(i16, i16) -> bool {
 }
 
 impl Canvas {
-    /// Applies a mask to the canvas. This method will also draw the format info
-    /// patterns.
+    /// Tuvale bir maske uygular. Bu metot biçim bilgisi desenlerini de çizer.
+    ///
     /// # Panics
     ///
-    /// Panics if `pattern` is not supported by this canvas's version and error
-    /// correction level. Use [`Canvas::try_apply_mask`] to get an error
-    /// instead; the two are otherwise identical.
+    /// `pattern` bu tuvalin sürümü ve hata düzeltme seviyesi tarafından
+    /// desteklenmiyorsa panikler. Bunun yerine hata almak için
+    /// [`Canvas::try_apply_mask`] kullanın; ikisi bunun dışında aynıdır.
     pub fn apply_mask(&mut self, pattern: MaskPattern) {
-        #[expect(clippy::expect_used, reason = "documented panic; try_apply_mask is the checked form")]
-        self.try_apply_mask(pattern).expect("unsupported mask pattern for this version and ec level");
+        #[expect(clippy::expect_used, reason = "belgelenmiş panik; kontrollü biçim try_apply_mask")]
+        self.try_apply_mask(pattern).expect("bu sürüm ve ec seviyesi için desteklenmeyen maske deseni");
     }
 
-    /// Applies a mask to the canvas. This method will also draw the format info
-    /// patterns.
+    /// Tuvale bir maske uygular. Bu metot biçim bilgisi desenlerini de çizer.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::InvalidMaskPattern)` if `pattern` is not one of
-    /// the four patterns a Micro QR code supports, and
-    /// `Err(QrError::InvalidVersion)` if the version and error correction level
-    /// do not name a symbol the standard defines.
+    /// `pattern` bir Micro QR kodunun desteklediği dört desenden biri değilse
+    /// `Err(QrError::InvalidMaskPattern)`, sürüm ve hata düzeltme seviyesi
+    /// standardın tanımladığı bir sembolü adlandırmıyorsa
+    /// `Err(QrError::InvalidVersion)` döndürür.
     ///
-    /// The canvas is left untouched when either check fails.
+    /// Her iki kontrol de başarısız olduğunda tuvale dokunulmaz.
     pub fn try_apply_mask(&mut self, pattern: MaskPattern) -> QrResult<()> {
-        // Resolve the format information first: a rejected pattern must not
-        // leave the canvas half masked.
+        // Önce biçim bilgisini çöz: reddedilen bir desen tuvali yarı maskelenmiş
+        // bırakmamalı.
         let format_number = self.format_info(pattern)?;
 
         let mask_fn = get_mask_function(pattern);
@@ -1693,13 +1687,13 @@ impl Canvas {
         Ok(())
     }
 
-    /// Computes the format information encoding the error correction level and
-    /// mask pattern.
+    /// Hata düzeltme seviyesini ve maske desenini kodlayan biçim bilgisini
+    /// hesaplar.
     fn format_info(&self, pattern: MaskPattern) -> QrResult<u16> {
         match self.version.kind() {
             VersionKind::Normal(_) => {
                 let index = ((self.ec_level as usize) ^ 1) << 3 | (pattern as usize);
-                // `ec_level` is 0..4 and `pattern` is 0..8, so `index` is 0..32.
+                // `ec_level` 0..4 ve `pattern` 0..8, yani `index` 0..32 aralığındadır.
                 FORMAT_INFOS_QR.get(index).copied().ok_or(QrError::InvalidVersion)
             }
             VersionKind::Micro(a) => {
@@ -1840,11 +1834,9 @@ static FORMAT_INFOS_MICRO_QR: [u16; 32] = [
 //{{{ Penalty score
 
 impl Canvas {
-    /// Compute the penalty score for having too many adjacent modules with the
-    /// same color.
+    /// Aynı renkte fazla sayıda komşu modül bulunmasının ceza puanını hesaplar.
     ///
-    /// Every 5+N adjacent modules in the same column/row having the same color
-    /// will contribute 3+N points.
+    /// Aynı sütun/satırda aynı renge sahip her 5+N komşu modül 3+N puan katar.
     fn compute_adjacent_penalty_score(&self, is_horizontal: bool) -> u16 {
         let mut total_score = 0;
 
@@ -1871,11 +1863,9 @@ impl Canvas {
         total_score
     }
 
-    /// Compute the penalty score for having too many rectangles with the same
-    /// color.
+    /// Aynı renkte fazla sayıda dikdörtgen bulunmasının ceza puanını hesaplar.
     ///
-    /// Every 2×2 blocks (with overlapping counted) having the same color will
-    /// contribute 3 points.
+    /// Aynı renge sahip her 2×2 blok (üst üste binenler sayılarak) 3 puan katar.
     fn compute_block_penalty_score(&self) -> u16 {
         let mut total_score = 0;
 
@@ -1894,11 +1884,10 @@ impl Canvas {
         total_score
     }
 
-    /// Compute the penalty score for having a pattern similar to the finder
-    /// pattern in the wrong place.
+    /// Yanlış yerde bulucu desenine benzer bir desen bulunmasının ceza puanını
+    /// hesaplar.
     ///
-    /// Every pattern that looks like `#.###.#....` in any orientation will add
-    /// 40 points.
+    /// Herhangi bir yönelimde `#.###.#....` gibi görünen her desen 40 puan ekler.
     fn compute_finder_penalty_score(&self, is_horizontal: bool) -> u16 {
         static PATTERN: [Color; 7] =
             [Color::Dark, Color::Light, Color::Dark, Color::Dark, Color::Dark, Color::Light, Color::Dark];
@@ -1907,7 +1896,7 @@ impl Canvas {
 
         for i in 0..self.width {
             for j in 0..self.width - 6 {
-                // TODO a ref to a closure should be enough?
+                // TODO bir closure'a referans yeterli olmalı?
                 let get: Box<dyn Fn(i16) -> Color> = if is_horizontal {
                     Box::new(|k| self.get(k, i).into())
                 } else {
@@ -1928,14 +1917,14 @@ impl Canvas {
         total_score - 360
     }
 
-    /// Compute the penalty score for having an unbalanced dark/light ratio.
+    /// Dengesiz koyu/açık oranının ceza puanını hesaplar.
     ///
-    /// The score is given linearly by the deviation from a 50% ratio of dark
-    /// modules. The highest possible score is 100.
+    /// Puan, koyu modüllerin %50 oranından sapmasıyla doğrusal olarak verilir.
+    /// Mümkün olan en yüksek puan 100'dür.
     ///
-    /// Note that this algorithm differs slightly from the standard we do not
-    /// round the result every 5%, but the difference should be negligible and
-    /// should not affect which mask is chosen.
+    /// Bu algoritmanın standarttan biraz farklı olduğuna dikkat edin: sonucu her
+    /// %5'te bir yuvarlamıyoruz, ama fark ihmal edilebilir olmalı ve hangi
+    /// maskenin seçileceğini etkilememeli.
     fn compute_balance_penalty_score(&self) -> u16 {
         let dark_modules = self.modules.iter().filter(|m| m.is_dark()).count();
         let total_modules = self.modules.len();
@@ -1943,13 +1932,13 @@ impl Canvas {
         ratio.abs_diff(100).as_u16()
     }
 
-    /// Compute the penalty score for having too many light modules on the sides.
+    /// Kenarlarda fazla sayıda açık modül bulunmasının ceza puanını hesaplar.
     ///
-    /// This penalty score is exclusive to Micro QR code.
+    /// Bu ceza puanı Micro QR koduna özgüdür.
     ///
-    /// Note that the standard gives the formula for *efficiency* score, which
-    /// has the inverse meaning of this method, but it is very easy to convert
-    /// between the two (this score is (16×width − standard-score)).
+    /// Standardın bu metodun tersi anlama gelen *verimlilik* puanı formülünü
+    /// verdiğine dikkat edin, ancak ikisi arasında dönüşüm çok kolaydır (bu puan
+    /// (16×width − standart-puan) değeridir).
     fn compute_light_side_penalty_score(&self) -> u16 {
         let h = (1..self.width).filter(|j| !self.get(*j, -1).is_dark()).count();
         let v = (1..self.width).filter(|j| !self.get(-1, *j).is_dark()).count();
@@ -1957,8 +1946,8 @@ impl Canvas {
         (h + v + 15 * max(h, v)).as_u16()
     }
 
-    /// Compute the total penalty scores. A QR code having higher points is less
-    /// desirable.
+    /// Toplam ceza puanlarını hesaplar. Daha yüksek puana sahip bir QR kodu daha
+    /// az tercih edilir.
     fn compute_total_penalty_scores(&self) -> u16 {
         match self.version.kind() {
             VersionKind::Normal(_) => {
@@ -2118,14 +2107,14 @@ static ALL_PATTERNS_MICRO_QR: [MaskPattern; 4] =
     [MaskPattern::HorizontalLines, MaskPattern::LargeCheckerboard, MaskPattern::Diamonds, MaskPattern::Meadow];
 
 impl Canvas {
-    /// Construct a new canvas and apply the best masking that gives the lowest
-    /// penalty score.
+    /// Yeni bir tuval kurar ve en düşük ceza puanını veren en iyi maskelemeyi
+    /// uygular.
     ///
     /// # Errors
     ///
-    /// Returns `Err(QrError::InvalidVersion)` if the version and error
-    /// correction level do not name a symbol the standard defines, which is the
-    /// only way every candidate pattern can be rejected.
+    /// Sürüm ve hata düzeltme seviyesi standardın tanımladığı bir sembolü
+    /// adlandırmıyorsa `Err(QrError::InvalidVersion)` döndürür; her aday desenin
+    /// reddedilmesinin tek yolu budur.
     pub fn apply_best_mask(&self) -> QrResult<Self> {
         let patterns: &[MaskPattern] = match self.version.kind() {
             VersionKind::Normal(_) => &ALL_PATTERNS_QR,
@@ -2142,13 +2131,13 @@ impl Canvas {
             .ok_or(QrError::InvalidVersion)
     }
 
-    /// Convert the modules into a vector of booleans.
+    /// Modülleri bir bool vektörüne dönüştürür.
     #[deprecated(since = "0.4.0", note = "use `into_colors()` instead")]
     pub fn to_bools(&self) -> Vec<bool> {
         self.modules.iter().map(|m| m.is_dark()).collect()
     }
 
-    /// Convert the modules into a vector of colors.
+    /// Modülleri bir renk vektörüne dönüştürür.
     pub fn into_colors(self) -> Vec<Color> {
         self.modules.into_iter().map(Color::from).collect()
     }

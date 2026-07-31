@@ -1,4 +1,4 @@
-//! Raster image rendering support powered by the [`image`] crate.
+//! [`image`] crate'i tarafından desteklenen raster görüntü çizim desteği.
 
 #![cfg(feature = "image")]
 
@@ -9,8 +9,9 @@ use image::{ImageBuffer, Luma, LumaA, Primitive, Rgb, Rgba};
 
 use alloc::vec::Vec;
 
-// need to keep using this macro to implement Pixel separately for each color model,
-// otherwise we'll have conflicting impl with `impl Pixel for impl Element` 🤷
+// Pixel'i her renk modeli için ayrı ayrı implemente etmek üzere bu makroyu
+// kullanmaya devam etmek gerekiyor; aksi hâlde `impl Pixel for impl Element`
+// ile çakışan bir impl oluşuyor 🤷
 macro_rules! impl_pixel_for_image_pixel {
     ($p:ident<$s:ident>: $c:pat => $d:expr) => {
         impl<$s> Pixel for $p<$s>
