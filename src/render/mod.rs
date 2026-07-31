@@ -1,7 +1,6 @@
 //! Render a QR code into image.
 
-use crate::cast::As;
-use crate::types::Color;
+use crate::types::{Color, QrError, QrResult};
 use core::cmp::max;
 
 pub mod eps;
@@ -10,6 +9,16 @@ pub mod pic;
 pub mod string;
 pub mod svg;
 pub mod unicode;
+
+/// The largest image, in pixels, that [`Renderer::try_build`] will attempt to
+/// allocate. Anything above this is reported as `QrError::ImageTooLarge`
+/// instead of being handed to the allocator.
+///
+/// The ceiling is 2<sup>32</sup> pixels: a version 40 symbol including its
+/// quiet zone is 185 modules across, so this still allows well over 300 pixels
+/// per module — far beyond any practical rendering — while keeping a hostile
+/// `module_dimensions` request from aborting the process.
+pub const MAX_IMAGE_PIXELS: u64 = 1 << 32;
 
 //------------------------------------------------------------------------------
 //{{{ Pixel trait
@@ -82,18 +91,40 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     ///
     /// # Panics
     ///
-    /// Panics if the length of `content` is not exactly `modules_count * modules_count`.
+    /// Panics if the length of `content` is not exactly
+    /// `modules_count * modules_count`, or if `modules_count` does not fit in a
+    /// `u32`. Use [`Renderer::try_new`] for the checked form.
     pub fn new(content: &'a [Color], modules_count: usize, quiet_zone: u32) -> Self {
-        assert!(modules_count * modules_count == content.len());
-        Renderer {
+        #[expect(clippy::expect_used, reason = "documented panic; try_new is the checked form")]
+        Self::try_new(content, modules_count, quiet_zone).expect("content length does not match modules_count")
+    }
+
+    /// Creates a new renderer, reporting a mismatched `content` instead of
+    /// panicking.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(QrError::ImageTooLarge)` if the length of `content` is not
+    /// exactly `modules_count * modules_count`, or if `modules_count` does not
+    /// fit in a `u32`.
+    ///
+    /// The multiplication is checked, so an enormous `modules_count` reports an
+    /// error rather than wrapping into a length that happens to match.
+    pub fn try_new(content: &'a [Color], modules_count: usize, quiet_zone: u32) -> QrResult<Self> {
+        let area = modules_count.checked_mul(modules_count).ok_or(QrError::ImageTooLarge)?;
+        if area != content.len() {
+            return Err(QrError::ImageTooLarge);
+        }
+        let modules_count = u32::try_from(modules_count).or(Err(QrError::ImageTooLarge))?;
+        Ok(Renderer {
             content,
-            modules_count: modules_count.as_u32(),
+            modules_count,
             quiet_zone,
             module_size: P::default_unit_size(),
             dark_color: P::default_color(Color::Dark),
             light_color: P::default_color(Color::Light),
             has_quiet_zone: true,
-        }
+        })
     }
 
     /// Sets color of a dark module. Default is opaque black.
@@ -148,11 +179,21 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     /// quiet zone. If we request an image of size ≥200×200, we get that each
     /// module's size should be 11×11, so the actual image size will be 209×209.
     pub fn min_dimensions(&mut self, width: u32, height: u32) -> &mut Self {
-        let quiet_zone = if self.has_quiet_zone { 2 } else { 0 } * self.quiet_zone;
-        let width_in_modules = self.modules_count + quiet_zone;
-        let unit_width = (width + width_in_modules - 1) / width_in_modules;
-        let unit_height = (height + width_in_modules - 1) / width_in_modules;
+        let width_in_modules = self.width_in_modules();
+        // `div_ceil` rather than `(a + b - 1) / b`, which overflows for a
+        // requested size close to `u32::MAX`.
+        let unit_width = width.div_ceil(width_in_modules);
+        let unit_height = height.div_ceil(width_in_modules);
         self.module_dimensions(unit_width, unit_height)
+    }
+
+    /// The number of modules across the finished image, quiet zone included.
+    ///
+    /// Clamped to at least 1: an empty QR code has no modules, and dividing the
+    /// requested image size by zero would otherwise abort.
+    fn width_in_modules(&self) -> u32 {
+        let quiet_zone = if self.has_quiet_zone { 2 } else { 0 } * self.quiet_zone;
+        self.modules_count.saturating_add(quiet_zone).max(1)
     }
 
     /// Sets the maximum total image size in pixels, including the quiet zone if
@@ -167,8 +208,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     /// The module size is at least 1×1, so if the restriction is too small, the
     /// final image *can* be larger than the input.
     pub fn max_dimensions(&mut self, width: u32, height: u32) -> &mut Self {
-        let quiet_zone = if self.has_quiet_zone { 2 } else { 0 } * self.quiet_zone;
-        let width_in_modules = self.modules_count + quiet_zone;
+        let width_in_modules = self.width_in_modules();
         let unit_width = width / width_in_modules;
         let unit_height = height / width_in_modules;
         self.module_dimensions(unit_width, unit_height)
@@ -181,21 +221,50 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     }
 
     /// Renders the QR code into an image.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting image dimensions overflow a `u32`. Use
+    /// [`Renderer::try_build`] for the checked form.
     pub fn build(&self) -> P::Image {
+        #[expect(clippy::expect_used, reason = "documented panic; try_build is the checked form")]
+        self.try_build().expect("image dimensions overflow")
+    }
+
+    /// Renders the QR code into an image, reporting oversized output instead of
+    /// panicking.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(QrError::ImageTooLarge)` if the module count, quiet zone
+    /// and module size multiply out to dimensions beyond `u32`. Without the
+    /// check this wraps in release builds and silently produces an image of the
+    /// wrong size.
+    pub fn try_build(&self) -> QrResult<P::Image> {
         let w = self.modules_count;
         let qz = if self.has_quiet_zone { self.quiet_zone } else { 0 };
-        let width = w + 2 * qz;
+        let width = qz.checked_mul(2).and_then(|qz| w.checked_add(qz)).ok_or(QrError::ImageTooLarge)?;
 
         let (mw, mh) = self.module_size;
-        let real_width = width * mw;
-        let real_height = width * mh;
+        let real_width = width.checked_mul(mw).ok_or(QrError::ImageTooLarge)?;
+        let real_height = width.checked_mul(mh).ok_or(QrError::ImageTooLarge)?;
+
+        // The backends allocate `real_width * real_height` elements up front.
+        // Without this check a large enough request reaches `Vec` with a
+        // saturated length and aborts the process on capacity overflow, which a
+        // caller cannot catch. `MAX_IMAGE_PIXELS` is the one place that turns
+        // "too big to allocate" into an ordinary error.
+        let area = u64::from(real_width) * u64::from(real_height);
+        if area > MAX_IMAGE_PIXELS {
+            return Err(QrError::ImageTooLarge);
+        }
 
         let mut canvas = P::Canvas::new(real_width, real_height, self.dark_color, self.light_color);
         let mut i = 0;
         for y in 0..width {
             for x in 0..width {
                 if qz <= x && x < w + qz && qz <= y && y < w + qz {
-                    if self.content[i] != Color::Light {
+                    if self.content.get(i).copied() != Some(Color::Light) {
                         canvas.draw_dark_rect(x * mw, y * mh, mw, mh);
                     }
                     i += 1;
@@ -203,7 +272,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
             }
         }
 
-        canvas.into_image()
+        Ok(canvas.into_image())
     }
 }
 

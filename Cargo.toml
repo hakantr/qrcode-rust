@@ -2,9 +2,9 @@
 name = "qrcode"
 description = "QR code encoder in Rust"
 license = "MIT OR Apache-2.0"
-version = "0.14.1"
-edition = "2021"
-rust-version = "1.70.0"
+version = "0.15.0"
+edition = "2024"
+rust-version = "1.95.0"
 authors = ["kennytm <kennytm@gmail.com>"]
 keywords = ["qrcode"]
 categories = ["encoding", "multimedia::images"]
@@ -12,11 +12,28 @@ repository = "https://github.com/kennytm/qrcode-rust"
 readme = "README.md"
 documentation = "http://docs.rs/qrcode"
 exclude = [
+    "fuzz/**",
     ".travis.yml", ".gitignore", "test-data/**"
 ]
 
 [badges]
 maintenance = { status = "passively-maintained" }
+
+# The crate's contract is that a valid input never aborts the process and an
+# invalid one comes back as a `QrError`. These lints are what keep that true:
+# every remaining panicking construct has to be introduced deliberately, with an
+# `#[expect(..., reason = "...")]` saying why it cannot fire. See tests/no_panic.rs
+# for the runtime half of the same guarantee.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+indexing_slicing = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "deny"
+exit = "deny"
+must_use_candidate = "allow"
 
 [dependencies]
 image = { version = "0.25", default-features = false, optional = true }

@@ -4,7 +4,7 @@
 //! use qrcode::canvas::{Canvas, MaskPattern};
 //! use qrcode::types::{EcLevel, Version};
 //!
-//! let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
+//! let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
 //! c.draw_all_functional_patterns();
 //! c.draw_data(b"data_here", b"ec_code_here");
 //! c.apply_mask(MaskPattern::Checkerboard);
@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 use core::{cmp::max, iter};
 
 use crate::cast::As;
-use crate::types::{Color, EcLevel, Version};
+use crate::types::{Color, EcLevel, QrError, QrResult, Version, VersionKind};
 
 //------------------------------------------------------------------------------
 //{{{ Modules
@@ -107,7 +107,7 @@ impl Canvas {
     #[cfg(test)]
     fn to_debug_str(&self) -> alloc::string::String {
         let width = self.width;
-        let mut res = alloc::string::String::with_capacity((width * (width + 1)) as usize);
+        let mut res = alloc::string::String::with_capacity((width * (width + 1)).as_usize());
         for y in 0..width {
             res.push('\n');
             for x in 0..width {
@@ -123,27 +123,85 @@ impl Canvas {
         res
     }
 
-    fn coords_to_index(&self, x: i16, y: i16) -> usize {
-        let x = if x < 0 { x + self.width } else { x }.as_usize();
-        let y = if y < 0 { y + self.width } else { y }.as_usize();
-        y * self.width.as_usize() + x
+    /// Maps a coordinate pair onto an index into `self.modules`, or `None` if
+    /// it falls outside the symbol. Negative coordinates wrap around, so the
+    /// accepted range is `-width..width` on both axes.
+    fn coords_to_index(&self, x: i16, y: i16) -> Option<usize> {
+        let normalise = |v: i16| match v {
+            _ if v >= self.width => None,
+            _ if v >= 0 => Some(v.as_usize()),
+            _ if v >= -self.width => Some((v + self.width).as_usize()),
+            _ => None,
+        };
+        let x = normalise(x)?;
+        let y = normalise(y)?;
+        // width <= 177, so this is at most 31328 and cannot overflow.
+        Some(y * self.width.as_usize() + x)
+    }
+
+    /// Obtains a module at the given coordinates, or `None` if the coordinates
+    /// fall outside the symbol. For convenience, negative coordinates will wrap
+    /// around.
+    pub fn get_module(&self, x: i16, y: i16) -> Option<Module> {
+        self.modules.get(self.coords_to_index(x, y)?).copied()
+    }
+
+    /// Obtains a mutable module at the given coordinates, or `None` if the
+    /// coordinates fall outside the symbol. For convenience, negative
+    /// coordinates will wrap around.
+    pub fn get_module_mut(&mut self, x: i16, y: i16) -> Option<&mut Module> {
+        let index = self.coords_to_index(x, y)?;
+        self.modules.get_mut(index)
     }
 
     /// Obtains a module at the given coordinates. For convenience, negative
     /// coordinates will wrap around.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coordinates fall outside the symbol. Use
+    /// [`Canvas::get_module`] for the checked form.
     pub fn get(&self, x: i16, y: i16) -> Module {
-        self.modules[self.coords_to_index(x, y)]
+        #[expect(clippy::expect_used, reason = "documented panic; get_module is the checked form")]
+        self.get_module(x, y).expect("coordinate out of range")
     }
 
     /// Obtains a mutable module at the given coordinates. For convenience,
     /// negative coordinates will wrap around.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coordinates fall outside the symbol. Use
+    /// [`Canvas::get_module_mut`] for the checked form.
     pub fn get_mut(&mut self, x: i16, y: i16) -> &mut Module {
-        let index = self.coords_to_index(x, y);
-        &mut self.modules[index]
+        #[expect(clippy::expect_used, reason = "documented panic; get_module_mut is the checked form")]
+        self.get_module_mut(x, y).expect("coordinate out of range")
     }
 
     /// Sets the color of a functional module at the given coordinates. For
     /// convenience, negative coordinates will wrap around.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(QrError::CoordinateOutOfRange)` if the coordinates fall
+    /// outside the symbol, leaving the canvas untouched.
+    pub fn try_put(&mut self, x: i16, y: i16, color: Color) -> QrResult<()> {
+        match self.get_module_mut(x, y) {
+            Some(module) => {
+                *module = Module::Masked(color);
+                Ok(())
+            }
+            None => Err(QrError::CoordinateOutOfRange),
+        }
+    }
+
+    /// Sets the color of a functional module at the given coordinates. For
+    /// convenience, negative coordinates will wrap around.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the coordinates fall outside the symbol. Use
+    /// [`Canvas::try_put`] for the checked form.
     pub fn put(&mut self, x: i16, y: i16, color: Color) {
         *self.get_mut(x, y) = Module::Masked(color);
     }
@@ -156,7 +214,7 @@ mod basic_canvas_tests {
 
     #[test]
     fn test_index() {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
 
         assert_eq!(c.get(0, 4), Module::Empty);
         assert_eq!(c.get(-1, -7), Module::Empty);
@@ -171,7 +229,7 @@ mod basic_canvas_tests {
 
     #[test]
     fn test_debug_str() {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
 
         for i in 3_i16..20 {
             for j in 3_i16..20 {
@@ -228,7 +286,6 @@ impl Canvas {
                 self.put(
                     x + i,
                     y + j,
-                    #[allow(clippy::match_same_arms)]
                     match (i, j) {
                         (4 | -4, _) | (_, 4 | -4) => Color::Light,
                         (3 | -3, _) | (_, 3 | -3) => Color::Dark,
@@ -248,9 +305,9 @@ impl Canvas {
     fn draw_finder_patterns(&mut self) {
         self.draw_finder_pattern_at(3, 3);
 
-        match self.version {
-            Version::Micro(_) => {}
-            Version::Normal(_) => {
+        match self.version.kind() {
+            VersionKind::Micro(_) => {}
+            VersionKind::Normal(_) => {
                 self.draw_finder_pattern_at(-4, 3);
                 self.draw_finder_pattern_at(3, -4);
             }
@@ -265,7 +322,7 @@ mod finder_pattern_tests {
 
     #[test]
     fn test_qr() {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
         c.draw_finder_patterns();
         assert_eq!(
             &*c.to_debug_str(),
@@ -296,7 +353,7 @@ mod finder_pattern_tests {
 
     #[test]
     fn test_micro_qr() {
-        let mut c = Canvas::new(Version::Micro(1), EcLevel::L);
+        let mut c = Canvas::new(Version::micro(1).unwrap(), EcLevel::L);
         c.draw_finder_patterns();
         assert_eq!(
             &*c.to_debug_str(),
@@ -345,11 +402,13 @@ impl Canvas {
     /// The alignment patterns are 5×5 square patterns inside the QR code symbol
     /// to help the scanner create the square grid.
     fn draw_alignment_patterns(&mut self) {
-        match self.version {
-            Version::Micro(_) | Version::Normal(1) => {}
-            Version::Normal(2..=6) => self.draw_alignment_pattern_at(-7, -7),
-            Version::Normal(a) => {
-                let positions = ALIGNMENT_PATTERN_POSITIONS[(a - 7).as_usize()];
+        match self.version.kind() {
+            VersionKind::Micro(_) | VersionKind::Normal(1) => {}
+            VersionKind::Normal(2..=6) => self.draw_alignment_pattern_at(-7, -7),
+            VersionKind::Normal(a) => {
+                // `a` is 7..=40 here, so the index is 0..=33 and the table has
+                // 34 rows; an empty fallback keeps this total either way.
+                let positions = ALIGNMENT_PATTERN_POSITIONS.get((a - 7).as_usize()).copied().unwrap_or(&[]);
                 for x in positions {
                     for y in positions {
                         self.draw_alignment_pattern_at(*x, *y);
@@ -367,7 +426,7 @@ mod alignment_pattern_tests {
 
     #[test]
     fn test_draw_alignment_patterns_1() {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
         c.draw_finder_patterns();
         c.draw_alignment_patterns();
         assert_eq!(
@@ -399,7 +458,7 @@ mod alignment_pattern_tests {
 
     #[test]
     fn test_draw_alignment_patterns_3() {
-        let mut c = Canvas::new(Version::Normal(3), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(3).unwrap(), EcLevel::L);
         c.draw_finder_patterns();
         c.draw_alignment_patterns();
         assert_eq!(
@@ -439,7 +498,7 @@ mod alignment_pattern_tests {
 
     #[test]
     fn test_draw_alignment_patterns_7() {
-        let mut c = Canvas::new(Version::Normal(7), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(7).unwrap(), EcLevel::L);
         c.draw_finder_patterns();
         c.draw_alignment_patterns();
         assert_eq!(
@@ -571,9 +630,9 @@ impl Canvas {
     /// scanning.
     fn draw_timing_patterns(&mut self) {
         let width = self.width;
-        let (y, x1, x2) = match self.version {
-            Version::Micro(_) => (0, 8, width - 1),
-            Version::Normal(_) => (6, 8, width - 9),
+        let (y, x1, x2) = match self.version.kind() {
+            VersionKind::Micro(_) => (0, 8, width - 1),
+            VersionKind::Normal(_) => (6, 8, width - 9),
         };
         self.draw_line(x1, y, x2, y, Color::Dark, Color::Light);
         self.draw_line(y, x1, y, x2, Color::Dark, Color::Light);
@@ -587,7 +646,7 @@ mod timing_pattern_tests {
 
     #[test]
     fn test_draw_timing_patterns_qr() {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
         c.draw_timing_patterns();
         assert_eq!(
             &*c.to_debug_str(),
@@ -618,7 +677,7 @@ mod timing_pattern_tests {
 
     #[test]
     fn test_draw_timing_patterns_micro_qr() {
-        let mut c = Canvas::new(Version::Micro(1), EcLevel::L);
+        let mut c = Canvas::new(Version::micro(1).unwrap(), EcLevel::L);
         c.draw_timing_patterns();
         assert_eq!(
             &*c.to_debug_str(),
@@ -661,11 +720,11 @@ impl Canvas {
     /// Draws the format info patterns for an encoded number.
     fn draw_format_info_patterns_with_number(&mut self, format_info: u16) {
         let format_info = u32::from(format_info);
-        match self.version {
-            Version::Micro(_) => {
+        match self.version.kind() {
+            VersionKind::Micro(_) => {
                 self.draw_number(format_info, 15, Color::Dark, Color::Light, &FORMAT_INFO_COORDS_MICRO_QR);
             }
-            Version::Normal(_) => {
+            VersionKind::Normal(_) => {
                 self.draw_number(format_info, 15, Color::Dark, Color::Light, &FORMAT_INFO_COORDS_QR_MAIN);
                 self.draw_number(format_info, 15, Color::Dark, Color::Light, &FORMAT_INFO_COORDS_QR_SIDE);
                 self.put(8, -8, Color::Dark); // Dark module.
@@ -680,10 +739,11 @@ impl Canvas {
 
     /// Draws the version information patterns.
     fn draw_version_info_patterns(&mut self) {
-        match self.version {
-            Version::Micro(_) | Version::Normal(1..=6) => {}
-            Version::Normal(a) => {
-                let version_info = VERSION_INFOS[(a - 7).as_usize()];
+        match self.version.kind() {
+            VersionKind::Micro(_) | VersionKind::Normal(1..=6) => {}
+            VersionKind::Normal(a) => {
+                // `a` is 7..=40 here, so the index is 0..=33 into a 34-entry table.
+                let Some(&version_info) = VERSION_INFOS.get((a - 7).as_usize()) else { return };
                 self.draw_number(version_info, 18, Color::Dark, Color::Light, &VERSION_INFO_COORDS_BL);
                 self.draw_number(version_info, 18, Color::Dark, Color::Light, &VERSION_INFO_COORDS_TR);
             }
@@ -698,8 +758,8 @@ mod draw_version_info_tests {
 
     #[test]
     fn test_draw_number() {
-        let mut c = Canvas::new(Version::Micro(1), EcLevel::L);
-        c.draw_number(0b10101101, 8, Color::Dark, Color::Light, &[(0, 0), (0, -1), (-2, -2), (-2, 0)]);
+        let mut c = Canvas::new(Version::micro(1).unwrap(), EcLevel::L);
+        c.draw_number(0b1010_1101, 8, Color::Dark, Color::Light, &[(0, 0), (0, -1), (-2, -2), (-2, 0)]);
         assert_eq!(
             &*c.to_debug_str(),
             "\n\
@@ -719,7 +779,7 @@ mod draw_version_info_tests {
 
     #[test]
     fn test_draw_version_info_1() {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
         c.draw_version_info_patterns();
         assert_eq!(
             &*c.to_debug_str(),
@@ -750,7 +810,7 @@ mod draw_version_info_tests {
 
     #[test]
     fn test_draw_version_info_7() {
-        let mut c = Canvas::new(Version::Normal(7), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(7).unwrap(), EcLevel::L);
         c.draw_version_info_patterns();
 
         assert_eq!(
@@ -806,7 +866,7 @@ mod draw_version_info_tests {
 
     #[test]
     fn test_draw_reserved_format_info_patterns_qr() {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
         c.draw_reserved_format_info_patterns();
         assert_eq!(
             &*c.to_debug_str(),
@@ -837,7 +897,7 @@ mod draw_version_info_tests {
 
     #[test]
     fn test_draw_reserved_format_info_patterns_micro_qr() {
-        let mut c = Canvas::new(Version::Micro(1), EcLevel::L);
+        let mut c = Canvas::new(Version::micro(1).unwrap(), EcLevel::L);
         c.draw_reserved_format_info_patterns();
         assert_eq!(
             &*c.to_debug_str(),
@@ -982,25 +1042,32 @@ impl Canvas {
 /// Gets whether the module at the given coordinates represents a functional
 /// module.
 pub fn is_functional(version: Version, width: i16, x: i16, y: i16) -> bool {
-    debug_assert!(width == version.width());
+    debug_assert_eq!(width, version.width());
 
     let x = if x < 0 { x + width } else { x };
     let y = if y < 0 { y + width } else { y };
 
-    match version {
-        Version::Micro(_) => x == 0 || y == 0 || (x < 9 && y < 9),
-        Version::Normal(a) => {
+    match version.kind() {
+        VersionKind::Micro(_) => x == 0 || y == 0 || (x < 9 && y < 9),
+        VersionKind::Normal(a) => {
+            // The version information blocks are 6×3 areas next to the
+            // bottom-left and top-right finder patterns, present from version 7
+            // onwards. See `VERSION_INFO_COORDS_BL` / `VERSION_INFO_COORDS_TR`.
+            let version_info_test = a >= 7
+                && ((x < 6 && (width - 11..=width - 9).contains(&y))
+                    || (y < 6 && (width - 11..=width - 9).contains(&x)));
             let non_alignment_test = x == 6 || y == 6 || // Timing patterns
                     (x < 9 && y < 9) ||                  // Top-left finder pattern
                     (x < 9 && y >= width-8) ||           // Bottom-left finder pattern
-                    (x >= width-8 && y < 9); // Top-right finder pattern
+                    (x >= width-8 && y < 9) ||           // Top-right finder pattern
+                    version_info_test;
             match a {
                 _ if non_alignment_test => true,
                 1 => false,
                 2..=6 => (width - 7 - x).abs() <= 2 && (width - 7 - y).abs() <= 2,
                 _ => {
-                    let positions = ALIGNMENT_PATTERN_POSITIONS[(a - 7).as_usize()];
-                    let last = positions.len() - 1;
+                    let positions = ALIGNMENT_PATTERN_POSITIONS.get((a - 7).as_usize()).copied().unwrap_or(&[]);
+                    let Some(last) = positions.len().checked_sub(1) else { return false };
                     for (i, align_x) in positions.iter().enumerate() {
                         for (j, align_y) in positions.iter().enumerate() {
                             if i == 0 && (j == 0 || j == last) || (i == last && j == 0) {
@@ -1020,12 +1087,12 @@ pub fn is_functional(version: Version, width: i16, x: i16, y: i16) -> bool {
 
 #[cfg(test)]
 mod all_functional_patterns_tests {
-    use crate::canvas::{is_functional, Canvas};
+    use crate::canvas::{Canvas, is_functional};
     use crate::types::{EcLevel, Version};
 
     #[test]
     fn test_all_functional_patterns_qr() {
-        let mut c = Canvas::new(Version::Normal(2), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(2).unwrap(), EcLevel::L);
         c.draw_all_functional_patterns();
         assert_eq!(
             &*c.to_debug_str(),
@@ -1060,7 +1127,7 @@ mod all_functional_patterns_tests {
 
     #[test]
     fn test_all_functional_patterns_micro_qr() {
-        let mut c = Canvas::new(Version::Micro(1), EcLevel::L);
+        let mut c = Canvas::new(Version::micro(1).unwrap(), EcLevel::L);
         c.draw_all_functional_patterns();
         assert_eq!(
             &*c.to_debug_str(),
@@ -1081,7 +1148,7 @@ mod all_functional_patterns_tests {
 
     #[test]
     fn test_is_functional_qr_1() {
-        let version = Version::Normal(1);
+        let version = Version::normal(1).unwrap();
         assert!(is_functional(version, version.width(), 0, 0));
         assert!(is_functional(version, version.width(), 10, 6));
         assert!(!is_functional(version, version.width(), 10, 5));
@@ -1095,7 +1162,7 @@ mod all_functional_patterns_tests {
 
     #[test]
     fn test_is_functional_qr_3() {
-        let version = Version::Normal(3);
+        let version = Version::normal(3).unwrap();
         assert!(is_functional(version, version.width(), 0, 0));
         assert!(!is_functional(version, version.width(), 25, 24));
         assert!(is_functional(version, version.width(), 24, 24));
@@ -1106,20 +1173,27 @@ mod all_functional_patterns_tests {
 
     #[test]
     fn test_is_functional_qr_7() {
-        let version = Version::Normal(7);
+        let version = Version::normal(7).unwrap();
         assert!(is_functional(version, version.width(), 21, 4));
         assert!(is_functional(version, version.width(), 7, 21));
         assert!(is_functional(version, version.width(), 22, 22));
         assert!(is_functional(version, version.width(), 8, 8));
         assert!(!is_functional(version, version.width(), 19, 5));
-        assert!(!is_functional(version, version.width(), 36, 3));
-        assert!(!is_functional(version, version.width(), 4, 36));
         assert!(is_functional(version, version.width(), 38, 38));
+
+        // The 6×3 version information blocks, drawn from version 7 onwards.
+        // These used to be misreported as ordinary data modules.
+        assert!(is_functional(version, version.width(), 36, 3));
+        assert!(is_functional(version, version.width(), 4, 36));
+        assert!(is_functional(version, version.width(), 34, 0));
+        assert!(is_functional(version, version.width(), 0, 34));
+        assert!(!is_functional(version, version.width(), 33, 3)); // just left of the block
+        assert!(!is_functional(version, version.width(), 3, 33)); // just above the block
     }
 
     #[test]
     fn test_is_functional_micro() {
-        let version = Version::Micro(1);
+        let version = Version::micro(1).unwrap();
         assert!(is_functional(version, version.width(), 8, 0));
         assert!(is_functional(version, version.width(), 10, 0));
         assert!(!is_functional(version, version.width(), 10, 1));
@@ -1147,9 +1221,9 @@ impl DataModuleIter {
             x: width - 1,
             y: width - 1,
             width,
-            timing_pattern_column: match version {
-                Version::Micro(_) => 0,
-                Version::Normal(_) => 6,
+            timing_pattern_column: match version.kind() {
+                VersionKind::Micro(_) => 0,
+                VersionKind::Normal(_) => 6,
             },
         }
     }
@@ -1198,7 +1272,7 @@ mod data_iter_tests {
 
     #[test]
     fn test_qr() {
-        let res = DataModuleIter::new(Version::Normal(1)).collect::<Vec<(i16, i16)>>();
+        let res = DataModuleIter::new(Version::normal(1).unwrap()).collect::<Vec<(i16, i16)>>();
         assert_eq!(res, vec![
             (20, 20), (19, 20), (20, 19), (19, 19), (20, 18), (19, 18),
             (20, 17), (19, 17), (20, 16), (19, 16), (20, 15), (19, 15),
@@ -1284,7 +1358,7 @@ mod data_iter_tests {
 
     #[test]
     fn test_micro_qr() {
-        let res = DataModuleIter::new(Version::Micro(1)).collect::<Vec<(i16, i16)>>();
+        let res = DataModuleIter::new(Version::micro(1).unwrap()).collect::<Vec<(i16, i16)>>();
         assert_eq!(res, vec![
             (10, 10), (9, 10), (10, 9), (9, 9), (10, 8), (9, 8),
             (10, 7), (9, 7), (10, 6), (9, 6), (10, 5), (9, 5),
@@ -1315,7 +1389,7 @@ mod data_iter_tests {
 
     #[test]
     fn test_micro_qr_2() {
-        let res = DataModuleIter::new(Version::Micro(2)).collect::<Vec<(i16, i16)>>();
+        let res = DataModuleIter::new(Version::micro(2).unwrap()).collect::<Vec<(i16, i16)>>();
         assert_eq!(res, vec![
             (12, 12), (11, 12), (12, 11), (11, 11), (12, 10), (11, 10),
             (12, 9), (11, 9), (12, 8), (11, 8), (12, 7), (11, 7),
@@ -1385,8 +1459,11 @@ impl Canvas {
 
     /// Draws the encoded data and error correction codes to the empty modules.
     pub fn draw_data(&mut self, data: &[u8], ec: &[u8]) {
-        let is_half_codeword_at_end =
-            matches!((self.version, self.ec_level), (Version::Micro(1), EcLevel::L) | (Version::Micro(3), EcLevel::M));
+        // ISO/IEC 18004:2006 §6.4.10 Table 7: the M1 and M3 symbols hold a
+        // non-multiple of 8 data bits (20, and 84/68), so their final data
+        // codeword is only 4 bits wide. This holds for *both* error correction
+        // levels of M3, not just `M`.
+        let is_half_codeword_at_end = matches!(self.version.kind(), VersionKind::Micro(1 | 3));
         let mut coords = DataModuleIter::new(self.version);
         self.draw_codewords(data, is_half_codeword_at_end, &mut coords);
         self.draw_codewords(ec, false, &mut coords);
@@ -1400,7 +1477,7 @@ mod draw_codewords_test {
 
     #[test]
     fn test_micro_qr_1() {
-        let mut c = Canvas::new(Version::Micro(1), EcLevel::L);
+        let mut c = Canvas::new(Version::micro(1).unwrap(), EcLevel::L);
         c.draw_all_functional_patterns();
         c.draw_data(b"\x6e\x5d\xe2", b"\x2b\x63");
         assert_eq!(
@@ -1420,9 +1497,51 @@ mod draw_codewords_test {
         );
     }
 
+    /// The codewords produced for a symbol must occupy exactly the modules the
+    /// placement iterator visits: one bit too many silently drops the tail of
+    /// the error correction data, one bit too few leaves modules empty.
+    ///
+    /// This is what caught M3-L being drawn with a full trailing data codeword
+    /// instead of the 4-bit one required by ISO/IEC 18004:2006 §6.4.10.
+    #[test]
+    fn test_codeword_bits_match_module_count() {
+        use crate::bits::{Bits, all_versions};
+        use crate::canvas::{DataModuleIter, is_functional};
+        use crate::ec::construct_codewords;
+        use crate::types::VersionKind;
+
+        for version in all_versions() {
+            for ec_level in [EcLevel::L, EcLevel::M, EcLevel::Q, EcLevel::H] {
+                let mut bits = Bits::new(version);
+                let Ok(()) = bits.push_terminator(ec_level) else {
+                    continue; // invalid version / ec level combination
+                };
+                let Ok((data, ec)) = construct_codewords(&bits.into_bytes(), version, ec_level) else {
+                    continue;
+                };
+
+                let half_codeword = matches!(version.kind(), VersionKind::Micro(1 | 3));
+                let bits_count = (data.len() + ec.len()) * 8 - usize::from(half_codeword) * 4;
+                let width = version.width();
+                let modules_count =
+                    DataModuleIter::new(version).filter(|&(x, y)| !is_functional(version, width, x, y)).count();
+
+                // The leftovers are the "remainder bits" of ISO/IEC 18004:2006
+                // §6.7.2, Table 1, which are left unused by design.
+                let remainder_bits = match version.kind() {
+                    VersionKind::Normal(2..=6) => 7,
+                    VersionKind::Normal(14..=20 | 28..=34) => 3,
+                    VersionKind::Normal(21..=27) => 4,
+                    _ => 0,
+                };
+                assert_eq!(bits_count + remainder_bits, modules_count, "{version:?} {ec_level:?}");
+            }
+        }
+    }
+
     #[test]
     fn test_qr_2() {
-        let mut c = Canvas::new(Version::Normal(2), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(2).unwrap(), EcLevel::L);
         c.draw_all_functional_patterns();
         c.draw_data(
             b"\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\
@@ -1536,7 +1655,32 @@ fn get_mask_function(pattern: MaskPattern) -> fn(i16, i16) -> bool {
 impl Canvas {
     /// Applies a mask to the canvas. This method will also draw the format info
     /// patterns.
+    /// # Panics
+    ///
+    /// Panics if `pattern` is not supported by this canvas's version and error
+    /// correction level. Use [`Canvas::try_apply_mask`] to get an error
+    /// instead; the two are otherwise identical.
     pub fn apply_mask(&mut self, pattern: MaskPattern) {
+        #[expect(clippy::expect_used, reason = "documented panic; try_apply_mask is the checked form")]
+        self.try_apply_mask(pattern).expect("unsupported mask pattern for this version and ec level");
+    }
+
+    /// Applies a mask to the canvas. This method will also draw the format info
+    /// patterns.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(QrError::InvalidMaskPattern)` if `pattern` is not one of
+    /// the four patterns a Micro QR code supports, and
+    /// `Err(QrError::InvalidVersion)` if the version and error correction level
+    /// do not name a symbol the standard defines.
+    ///
+    /// The canvas is left untouched when either check fails.
+    pub fn try_apply_mask(&mut self, pattern: MaskPattern) -> QrResult<()> {
+        // Resolve the format information first: a rejected pattern must not
+        // leave the canvas half masked.
+        let format_number = self.format_info(pattern)?;
+
         let mask_fn = get_mask_function(pattern);
         for x in 0..self.width {
             for y in 0..self.width {
@@ -1545,27 +1689,26 @@ impl Canvas {
             }
         }
 
-        self.draw_format_info_patterns(pattern);
+        self.draw_format_info_patterns_with_number(format_number);
+        Ok(())
     }
 
-    /// Draws the format information to encode the error correction level and
+    /// Computes the format information encoding the error correction level and
     /// mask pattern.
-    ///
-    /// If the error correction level or mask pattern is not supported in the
-    /// current QR code version, this method will fail.
-    fn draw_format_info_patterns(&mut self, pattern: MaskPattern) {
-        let format_number = match self.version {
-            Version::Normal(_) => {
-                let simple_format_number = ((self.ec_level as usize) ^ 1) << 3 | (pattern as usize);
-                FORMAT_INFOS_QR[simple_format_number]
+    fn format_info(&self, pattern: MaskPattern) -> QrResult<u16> {
+        match self.version.kind() {
+            VersionKind::Normal(_) => {
+                let index = ((self.ec_level as usize) ^ 1) << 3 | (pattern as usize);
+                // `ec_level` is 0..4 and `pattern` is 0..8, so `index` is 0..32.
+                FORMAT_INFOS_QR.get(index).copied().ok_or(QrError::InvalidVersion)
             }
-            Version::Micro(a) => {
+            VersionKind::Micro(a) => {
                 let micro_pattern_number = match pattern {
                     MaskPattern::HorizontalLines => 0b00,
                     MaskPattern::LargeCheckerboard => 0b01,
                     MaskPattern::Diamonds => 0b10,
                     MaskPattern::Meadow => 0b11,
-                    _ => panic!("Unsupported mask pattern in Micro QR code"),
+                    _ => return Err(QrError::InvalidMaskPattern),
                 };
                 let symbol_number = match (a, self.ec_level) {
                     (1, EcLevel::L) => 0b000,
@@ -1576,13 +1719,12 @@ impl Canvas {
                     (4, EcLevel::L) => 0b101,
                     (4, EcLevel::M) => 0b110,
                     (4, EcLevel::Q) => 0b111,
-                    _ => panic!("Unsupported version/ec_level combination in Micro QR code"),
+                    _ => return Err(QrError::InvalidVersion),
                 };
-                let simple_format_number = symbol_number << 2 | micro_pattern_number;
-                FORMAT_INFOS_MICRO_QR[simple_format_number]
+                let index: usize = symbol_number << 2 | micro_pattern_number;
+                FORMAT_INFOS_MICRO_QR.get(index).copied().ok_or(QrError::InvalidVersion)
             }
-        };
-        self.draw_format_info_patterns_with_number(format_number);
+        }
     }
 }
 
@@ -1593,7 +1735,7 @@ mod mask_tests {
 
     #[test]
     fn test_apply_mask_qr() {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
         c.draw_all_functional_patterns();
         c.apply_mask(MaskPattern::Checkerboard);
 
@@ -1626,8 +1768,9 @@ mod mask_tests {
 
     #[test]
     fn test_draw_format_info_patterns_qr() {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::L);
-        c.draw_format_info_patterns(MaskPattern::LargeCheckerboard);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
+        let n = c.format_info(MaskPattern::LargeCheckerboard).unwrap();
+        c.draw_format_info_patterns_with_number(n);
         assert_eq!(
             &*c.to_debug_str(),
             "\n\
@@ -1657,8 +1800,9 @@ mod mask_tests {
 
     #[test]
     fn test_draw_format_info_patterns_micro_qr() {
-        let mut c = Canvas::new(Version::Micro(2), EcLevel::L);
-        c.draw_format_info_patterns(MaskPattern::LargeCheckerboard);
+        let mut c = Canvas::new(Version::micro(2).unwrap(), EcLevel::L);
+        let n = c.format_info(MaskPattern::LargeCheckerboard).unwrap();
+        c.draw_format_info_patterns_with_number(n);
         assert_eq!(
             &*c.to_debug_str(),
             "\n\
@@ -1816,8 +1960,8 @@ impl Canvas {
     /// Compute the total penalty scores. A QR code having higher points is less
     /// desirable.
     fn compute_total_penalty_scores(&self) -> u16 {
-        match self.version {
-            Version::Normal(_) => {
+        match self.version.kind() {
+            VersionKind::Normal(_) => {
                 let s1_a = self.compute_adjacent_penalty_score(true);
                 let s1_b = self.compute_adjacent_penalty_score(false);
                 let s2 = self.compute_block_penalty_score();
@@ -1826,7 +1970,7 @@ impl Canvas {
                 let s4 = self.compute_balance_penalty_score();
                 s1_a + s1_b + s2 + s3_a + s3_b + s4
             }
-            Version::Micro(_) => self.compute_light_side_penalty_score(),
+            VersionKind::Micro(_) => self.compute_light_side_penalty_score(),
         }
     }
 }
@@ -1834,10 +1978,11 @@ impl Canvas {
 #[cfg(test)]
 mod penalty_tests {
     use crate::canvas::{Canvas, MaskPattern};
+    use crate::cast::As;
     use crate::types::{Color, EcLevel, Version};
 
     fn create_test_canvas() -> Canvas {
-        let mut c = Canvas::new(Version::Normal(1), EcLevel::Q);
+        let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::Q);
         c.draw_all_functional_patterns();
         c.draw_data(
             b"\x20\x5b\x0b\x78\xd1\x72\xdc\x4d\x43\x40\xec\x11\x00",
@@ -1944,10 +2089,10 @@ mod penalty_tests {
             Color::Light,
         ];
 
-        let mut c = Canvas::new(Version::Micro(4), EcLevel::Q);
+        let mut c = Canvas::new(Version::micro(4).unwrap(), EcLevel::Q);
         for i in 0_i16..17 {
-            c.put(i, -1, HORIZONTAL_SIDE[i as usize]);
-            c.put(-1, i, VERTICAL_SIDE[i as usize]);
+            c.put(i, -1, HORIZONTAL_SIDE[i.as_usize()]);
+            c.put(-1, i, VERTICAL_SIDE[i.as_usize()]);
         }
 
         assert_eq!(c.compute_light_side_penalty_score(), 168);
@@ -1975,20 +2120,26 @@ static ALL_PATTERNS_MICRO_QR: [MaskPattern; 4] =
 impl Canvas {
     /// Construct a new canvas and apply the best masking that gives the lowest
     /// penalty score.
-    #[allow(clippy::missing_panics_doc)] // the expect() only panics when the input iterators (ALL_PATTERNS_QR, ALL_PATTERNS_MICRO_QR) are empty
-    #[must_use]
-    pub fn apply_best_mask(&self) -> Self {
-        match self.version {
-            Version::Normal(_) => ALL_PATTERNS_QR.iter(),
-            Version::Micro(_) => ALL_PATTERNS_MICRO_QR.iter(),
-        }
-        .map(|ptn| {
-            let mut c = self.clone();
-            c.apply_mask(*ptn);
-            c
-        })
-        .min_by_key(Self::compute_total_penalty_scores)
-        .expect("at least one pattern")
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(QrError::InvalidVersion)` if the version and error
+    /// correction level do not name a symbol the standard defines, which is the
+    /// only way every candidate pattern can be rejected.
+    pub fn apply_best_mask(&self) -> QrResult<Self> {
+        let patterns: &[MaskPattern] = match self.version.kind() {
+            VersionKind::Normal(_) => &ALL_PATTERNS_QR,
+            VersionKind::Micro(_) => &ALL_PATTERNS_MICRO_QR,
+        };
+        patterns
+            .iter()
+            .filter_map(|ptn| {
+                let mut c = self.clone();
+                c.try_apply_mask(*ptn).ok()?;
+                Some(c)
+            })
+            .min_by_key(Self::compute_total_penalty_scores)
+            .ok_or(QrError::InvalidVersion)
     }
 
     /// Convert the modules into a vector of booleans.

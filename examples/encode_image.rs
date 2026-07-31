@@ -1,3 +1,7 @@
+// Examples unwrap to keep the demo short; library code may not -- see the
+// [lints.clippy] gate in Cargo.toml.
+#![allow(clippy::unwrap_used, reason = "example code")]
+
 use image::Luma;
 use qrcode::QrCode;
 

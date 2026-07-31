@@ -76,27 +76,39 @@ impl<P: Element> RenderCanvas for Canvas<P> {
 
     fn new(width: u32, height: u32, dark_pixel: P, light_pixel: P) -> Self {
         let width = width.as_usize();
-        let height = height.as_isize();
-        let dark_cap = dark_pixel.strlen().as_isize();
-        let light_cap = light_pixel.strlen().as_isize();
+        let height = height.as_usize();
+        let dark_cap = dark_pixel.strlen();
+        let light_cap = light_pixel.strlen();
         Self {
-            buffer: vec![light_pixel; width * height.as_usize()],
+            buffer: vec![light_pixel; width.saturating_mul(height)],
             width,
             dark_pixel,
-            dark_cap_inc: dark_cap - light_cap,
-            capacity: light_cap * width.as_isize() * height + (height - 1),
+            // A dark element may be shorter than a light one, so the running
+            // adjustment is signed even though the total never goes below zero.
+            dark_cap_inc: dark_cap.as_isize() - light_cap.as_isize(),
+            // One newline between each pair of rows; an empty image has none,
+            // which used to underflow this to -1.
+            capacity: light_cap
+                .saturating_mul(width)
+                .saturating_mul(height)
+                .saturating_add(height.saturating_sub(1))
+                .as_isize(),
         }
     }
 
     fn draw_dark_pixel(&mut self, x: u32, y: u32) {
         let x = x.as_usize();
         let y = y.as_usize();
-        self.capacity += self.dark_cap_inc;
-        self.buffer[x + y * self.width] = self.dark_pixel;
+        if let Some(pixel) = self.buffer.get_mut(x + y * self.width) {
+            self.capacity += self.dark_cap_inc;
+            *pixel = self.dark_pixel;
+        }
     }
 
     fn into_image(self) -> String {
-        let mut result = String::with_capacity(self.capacity.as_usize());
+        // `dark_cap_inc` is negative when the dark element is the shorter one,
+        // so the running total can dip below zero before the last pixel.
+        let mut result = String::with_capacity(self.capacity.max(0).as_usize());
         for (i, pixel) in self.buffer.into_iter().enumerate() {
             if i != 0 && i % self.width == 0 {
                 result.push('\n');

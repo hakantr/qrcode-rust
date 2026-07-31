@@ -76,8 +76,12 @@ impl RenderCanvas for Canvas {
     }
 
     fn draw_dark_rect(&mut self, left: u32, top: u32, width: u32, height: u32) {
-        let bottom = self.height - top;
-        writeln!(self.eps, "{left} {bottom} {width} {height} rectfill").unwrap();
+        // PostScript's origin is at the bottom-left and `rectfill` takes the
+        // lower-left corner, so the whole rectangle -- not just its top edge --
+        // has to be flipped, otherwise the image is shifted up by `height`.
+        let bottom = self.height - top - height;
+        // Writing into a `String` is infallible.
+        let _ = writeln!(self.eps, "{left} {bottom} {width} {height} rectfill");
     }
 
     fn into_image(mut self) -> String {

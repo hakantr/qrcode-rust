@@ -29,9 +29,19 @@
 #![cfg_attr(feature = "bench", feature(test))] // Unstable libraries
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![warn(missing_docs)]
-#![warn(clippy::pedantic)]
-#![allow(
-    clippy::must_use_candidate, // This is just annoying.
+// Tests are allowed to be blunt: an `unwrap` in a test is a failed assertion,
+// not a panic escaping to a caller. The lint gate in Cargo.toml covers the
+// library code, which is what the no-panic contract is about.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unreachable,
+        reason = "test code asserts by panicking"
+    )
 )]
 #![cfg_attr(feature = "bench", doc = include_str!("../README.md"))]
 // ^ make sure we can test our README.md.
@@ -110,7 +120,7 @@ impl QrCode {
     /// ```
     /// use qrcode::{EcLevel, QrCode, Version};
     ///
-    /// let code = QrCode::with_version(b"Some data", Version::Normal(5), EcLevel::M).unwrap();
+    /// let code = QrCode::with_version(b"Some data", Version::normal(5).unwrap(), EcLevel::M).unwrap();
     /// ```
     ///
     /// This method can also be used to generate Micro QR code.
@@ -118,7 +128,7 @@ impl QrCode {
     /// ```
     /// use qrcode::{EcLevel, QrCode, Version};
     ///
-    /// let micro_code = QrCode::with_version(b"123", Version::Micro(1), EcLevel::L).unwrap();
+    /// let micro_code = QrCode::with_version(b"123", Version::micro(1).unwrap(), EcLevel::L).unwrap();
     /// ```
     ///
     /// # Errors
@@ -150,7 +160,7 @@ impl QrCode {
     /// use qrcode::bits::Bits;
     /// use qrcode::{EcLevel, QrCode, Version};
     ///
-    /// let mut bits = Bits::new(Version::Normal(1));
+    /// let mut bits = Bits::new(Version::normal(1).unwrap());
     /// bits.push_eci_designator(9);
     /// bits.push_byte_data(b"\xca\xfe\xe4\xe9\xea\xe1\xf2 QR");
     /// bits.push_terminator(EcLevel::L);
@@ -169,7 +179,7 @@ impl QrCode {
         let mut canvas = canvas::Canvas::new(version, ec_level);
         canvas.draw_all_functional_patterns();
         canvas.draw_data(&encoded_data, &ec_data);
-        let canvas = canvas.apply_best_mask();
+        let canvas = canvas.apply_best_mask()?;
         Ok(Self { content: canvas.into_colors(), version, ec_level, width: version.width().as_usize() })
     }
 
@@ -193,9 +203,20 @@ impl QrCode {
     /// Gets the maximum number of allowed erratic modules can be introduced
     /// before the data becomes corrupted. Note that errors should not be
     /// introduced to functional modules.
-    #[allow(clippy::missing_panics_doc)] // the version and ec_level should have been checked when calling `.with_version()`.
+    ///
+    /// A `QrCode` can only exist for a version and error correction level the
+    /// standard defines, so this lookup cannot fail.
     pub fn max_allowed_errors(&self) -> usize {
-        ec::max_allowed_errors(self.version, self.ec_level).expect("invalid version or ec_level")
+        ec::max_allowed_errors(self.version, self.ec_level).unwrap_or(0)
+    }
+
+    /// Checks whether a module at coordinate (x, y) is a functional module or
+    /// not, or `None` if the coordinate lies outside the QR code.
+    pub fn get_functional(&self, x: usize, y: usize) -> Option<bool> {
+        if x >= self.width || y >= self.width {
+            return None;
+        }
+        Some(canvas::is_functional(self.version, self.version.width(), x.as_i16(), y.as_i16()))
     }
 
     /// Checks whether a module at coordinate (x, y) is a functional module or
@@ -203,11 +224,24 @@ impl QrCode {
     ///
     /// # Panics
     ///
-    /// Panics if `x` or `y` is beyond the size of the QR code.
+    /// Panics if `x` or `y` is beyond the size of the QR code. Use
+    /// [`QrCode::get_functional`] for the checked form.
     pub fn is_functional(&self, x: usize, y: usize) -> bool {
-        let x = x.try_into().expect("coordinate is too large for QR code");
-        let y = y.try_into().expect("coordinate is too large for QR code");
-        canvas::is_functional(self.version, self.version.width(), x, y)
+        #[expect(clippy::expect_used, reason = "documented panic; get_functional is the checked form")]
+        self.get_functional(x, y).expect("coordinate is too large for QR code")
+    }
+
+    /// Gets the color of the module at coordinate (x, y), or `None` if the
+    /// coordinate lies outside the QR code.
+    ///
+    /// This is the non-panicking counterpart of indexing with `code[(x, y)]`.
+    pub fn get(&self, x: usize, y: usize) -> Option<Color> {
+        // Both bounds have to be checked up front: `y * self.width` overflows
+        // for a large `y` before the slice lookup ever gets a chance to fail.
+        if x >= self.width || y >= self.width {
+            return None;
+        }
+        self.content.get(y * self.width + x).copied()
     }
 
     /// Converts the QR code into a human-readable string. This is mainly for
@@ -274,9 +308,17 @@ impl QrCode {
 impl Index<(usize, usize)> for QrCode {
     type Output = Color;
 
+    /// Obtains the color of the module at coordinate (x, y).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x` or `y` is beyond the size of the QR code. Without the
+    /// check on `x`, an out-of-range column would silently alias into a
+    /// neighbouring row instead.
     fn index(&self, (x, y): (usize, usize)) -> &Color {
-        let index = y * self.width + x;
-        &self.content[index]
+        assert!(x < self.width && y < self.width, "coordinate is too large for QR code");
+        #[expect(clippy::indexing_slicing, reason = "bounds checked on the line above")]
+        &self.content[y * self.width + x]
     }
 }
 
@@ -287,7 +329,7 @@ mod tests {
     #[test]
     fn test_annex_i_qr() {
         // This uses the ISO Annex I as test vector.
-        let code = QrCode::with_version(b"01234567", Version::Normal(1), EcLevel::M).unwrap();
+        let code = QrCode::with_version(b"01234567", Version::normal(1).unwrap(), EcLevel::M).unwrap();
         assert_eq!(
             &*code.to_debug_str('#', '.'),
             "\
@@ -317,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_annex_i_micro_qr() {
-        let code = QrCode::with_version(b"01234567", Version::Micro(2), EcLevel::L).unwrap();
+        let code = QrCode::with_version(b"01234567", Version::micro(2).unwrap(), EcLevel::L).unwrap();
         assert_eq!(
             &*code.to_debug_str('#', '.'),
             "\
@@ -338,10 +380,71 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod smoke_tests {
+    use crate::bits::all_versions;
+    use crate::cast::As;
+    use crate::{EcLevel, QrCode, Version};
+    use alloc::vec::Vec;
+
+    /// Encoding must succeed -- and must not abort the process -- for every
+    /// version and error correction level the standard defines. Micro versions
+    /// M1 and M3 used to overflow while padding out their trailing half
+    /// codeword, taking down `QrCode::with_version` with them.
+    #[test]
+    fn test_every_version_and_ec_level() {
+        for version in all_versions() {
+            // Only the Micro versions hold a non-multiple of 8 data bits, so
+            // they are the ones where the terminator offset can land inside a
+            // half codeword. Sweeping every length there is what matters; the
+            // Normal versions only need one encode each to stay quick.
+            let lengths = if version.is_micro() { 0..24 } else { 0..1 };
+
+            for ec_level in [EcLevel::L, EcLevel::M, EcLevel::Q, EcLevel::H] {
+                for length in lengths.clone() {
+                    let digits = b"0123456789".iter().copied().cycle().take(length).collect::<Vec<u8>>();
+                    let Ok(code) = QrCode::with_version(&digits, version, ec_level) else {
+                        continue; // invalid combination, or the data does not fit
+                    };
+                    assert_eq!(code.width(), version.width().as_usize(), "{version:?} {ec_level:?} {length}");
+                    assert_eq!(code.to_colors().len(), code.width() * code.width());
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "coordinate is too large")]
+    fn test_index_out_of_range_column() {
+        // 25 is a valid *index* into a 21x21 code's backing store, but not a
+        // valid column: it used to silently alias into the next row.
+        let code = QrCode::with_version(b"01234567", Version::normal(1).unwrap(), EcLevel::M).unwrap();
+        let _ = code[(25, 0)];
+    }
+
+    #[test]
+    #[should_panic(expected = "coordinate is too large")]
+    fn test_is_functional_out_of_range() {
+        let code = QrCode::with_version(b"01234567", Version::normal(1).unwrap(), EcLevel::M).unwrap();
+        let _ = code.is_functional(21, 0);
+    }
+
+    #[test]
+    fn test_index_matches_to_colors() {
+        let code = QrCode::new(b"hello world").unwrap();
+        let colors = code.to_colors();
+        for y in 0..code.width() {
+            for x in 0..code.width() {
+                assert_eq!(code[(x, y)], colors[y * code.width() + x]);
+            }
+        }
+    }
+}
+
 #[cfg(all(test, feature = "image"))]
 mod image_tests {
     use crate::{EcLevel, QrCode, Version};
-    use image::{load_from_memory, Luma, Rgb};
+    use image::{Luma, Rgb, load_from_memory};
 
     #[test]
     fn test_annex_i_qr_as_image() {
@@ -354,7 +457,7 @@ mod image_tests {
 
     #[test]
     fn test_annex_i_micro_qr_as_image() {
-        let code = QrCode::with_version(b"01234567", Version::Micro(2), EcLevel::L).unwrap();
+        let code = QrCode::with_version(b"01234567", Version::micro(2).unwrap(), EcLevel::L).unwrap();
         let image = code
             .render()
             .min_dimensions(200, 200)
@@ -382,7 +485,7 @@ mod svg_tests {
 
     #[test]
     fn test_annex_i_micro_qr_as_svg() {
-        let code = QrCode::with_version(b"01234567", Version::Micro(2), EcLevel::L).unwrap();
+        let code = QrCode::with_version(b"01234567", Version::micro(2).unwrap(), EcLevel::L).unwrap();
         let image = code
             .render()
             .min_dimensions(200, 200)
@@ -409,7 +512,7 @@ mod pic_tests {
 
     #[test]
     fn test_annex_i_micro_qr_as_pic() {
-        let code = QrCode::with_version(b"01234567", Version::Micro(2), EcLevel::L).unwrap();
+        let code = QrCode::with_version(b"01234567", Version::micro(2).unwrap(), EcLevel::L).unwrap();
         let image = code.render::<PicColor>().min_dimensions(1, 1).build();
         let expected = include_str!("test_annex_i_micro_qr_as_pic.pic");
         assert_eq!(&image, expected);
@@ -431,7 +534,7 @@ mod eps_tests {
 
     #[test]
     fn test_annex_i_micro_qr_as_eps() {
-        let code = QrCode::with_version(b"01234567", Version::Micro(2), EcLevel::L).unwrap();
+        let code = QrCode::with_version(b"01234567", Version::micro(2).unwrap(), EcLevel::L).unwrap();
         let image = code
             .render()
             .min_dimensions(200, 200)

@@ -3,41 +3,52 @@
 use alloc::vec::Vec;
 use core::ops::Deref;
 
-use crate::types::{EcLevel, QrResult, Version};
+use crate::types::{EcLevel, QrError, QrResult, Version};
 
 //------------------------------------------------------------------------------
 //{{{ Error correction primitive
 
+/// The largest error correction code size this module can compute, i.e. the
+/// highest degree of generator polynomial this crate has a table for.
+pub const MAX_EC_CODE_SIZE: usize = 69;
+
 /// Creates the error correction code in N bytes.
-///
-/// This method only supports computing the error-correction code up to
-/// 69 bytes. Longer blocks will result in task panic.
 ///
 /// This method treats the data as a polynomial of the form
 /// (a\[0\] x<sup>m+n</sup> + a\[1\] x<sup>m+n-1</sup> + … + a\[m\] x<sup>n</sup>)
 /// in GF(2<sup>8</sup>), and then computes the polynomial modulus with a
 /// generator polynomial of degree N.
-pub fn create_error_correction_code(data: &[u8], ec_code_size: usize) -> Vec<u8> {
+///
+/// # Errors
+///
+/// Returns `Err(QrError::InvalidVersion)` if `ec_code_size` exceeds
+/// [`MAX_EC_CODE_SIZE`]. No QR code version calls for a longer block, so this
+/// is unreachable through the encoder itself; it used to be an index panic.
+pub fn create_error_correction_code(data: &[u8], ec_code_size: usize) -> QrResult<Vec<u8>> {
     let data_len = data.len();
-    let log_den = GENERATOR_POLYNOMIALS[ec_code_size];
+    let log_den = *GENERATOR_POLYNOMIALS.get(ec_code_size).ok_or(QrError::InvalidVersion)?;
 
     let mut res = data.to_vec();
     res.resize(ec_code_size + data_len, 0);
 
-    // rust-lang-nursery/rust-clippy#2213
     for i in 0..data_len {
-        let lead_coeff = res[i] as usize;
+        let Some(&lead_coeff) = res.get(i) else { break };
         if lead_coeff == 0 {
             continue;
         }
 
-        let log_lead_coeff = usize::from(LOG_TABLE[lead_coeff]);
-        for (u, v) in res[i + 1..].iter_mut().zip(log_den.iter()) {
-            *u ^= EXP_TABLE[(usize::from(*v) + log_lead_coeff) % 255];
+        // LOG_TABLE and EXP_TABLE are both 256 bytes and are indexed by a `u8`
+        // or by a value reduced modulo 255, so neither lookup can be out of
+        // range; `get` keeps that provable rather than merely commented.
+        let log_lead_coeff = LOG_TABLE.get(usize::from(lead_coeff)).copied().map_or(0, usize::from);
+        let tail = res.get_mut(i + 1..).unwrap_or_default();
+        for (u, v) in tail.iter_mut().zip(log_den.iter()) {
+            let exponent = (usize::from(*v) + log_lead_coeff) % 255;
+            *u ^= EXP_TABLE.get(exponent).copied().unwrap_or(0);
         }
     }
 
-    res.split_off(data_len)
+    Ok(res.split_off(data_len))
 }
 
 #[cfg(test)]
@@ -46,19 +57,19 @@ mod ec_tests {
 
     #[test]
     fn test_poly_mod_1() {
-        let res = create_error_correction_code(b" [\x0bx\xd1r\xdcMC@\xec\x11\xec\x11\xec\x11", 10);
+        let res = create_error_correction_code(b" [\x0bx\xd1r\xdcMC@\xec\x11\xec\x11\xec\x11", 10).unwrap();
         assert_eq!(&*res, b"\xc4#'w\xeb\xd7\xe7\xe2]\x17");
     }
 
     #[test]
     fn test_poly_mod_2() {
-        let res = create_error_correction_code(b" [\x0bx\xd1r\xdcMC@\xec\x11\xec", 13);
+        let res = create_error_correction_code(b" [\x0bx\xd1r\xdcMC@\xec\x11\xec", 13).unwrap();
         assert_eq!(&*res, b"\xa8H\x16R\xd96\x9c\x00.\x0f\xb4z\x10");
     }
 
     #[test]
     fn test_poly_mod_3() {
-        let res = create_error_correction_code(b"CUF\x86W&U\xc2w2\x06\x12\x06g&", 18);
+        let res = create_error_correction_code(b"CUF\x86W&U\xc2w2\x06\x12\x06g&", 18).unwrap();
         assert_eq!(&*res, b"\xd5\xc7\x0b-s\xf7\xf1\xdf\xe5\xf8\x9au\x9aoV\xa1o'");
     }
 }
@@ -72,15 +83,15 @@ mod ec_tests {
 /// It will first insert all the first elements of the slices in `blocks`, then
 /// all the second elements, then all the third elements, and so on.
 ///
-/// The longest slice must be at the last of `blocks`, and `blocks` must not be
-/// empty.
+/// The longest slice must be at the last of `blocks`. An empty `blocks` yields
+/// an empty result.
 fn interleave<T: Copy, V: Deref<Target = [T]>>(blocks: &[V]) -> Vec<T> {
-    let last_block_len = blocks.last().expect("non-empty blocks").len();
+    let last_block_len = blocks.last().map_or(0, |block| block.len());
     let mut res = Vec::with_capacity(last_block_len * blocks.len());
     for i in 0..last_block_len {
-        for t in blocks {
-            if i < t.len() {
-                res.push(t[i]);
+        for block in blocks {
+            if let Some(item) = block.get(i) {
+                res.push(*item);
             }
         }
     }
@@ -103,7 +114,7 @@ fn test_interleave() {
 /// # Errors
 ///
 /// Returns `Err(QrError::InvalidVersion)` if it is not valid to use the
-///  `ec_level` for the given version (e.g. `Version::Micro(1)` with
+///  `ec_level` for the given version (e.g. `Version::micro(1)` with
 /// `EcLevel::H`).
 pub fn construct_codewords(rawbits: &[u8], version: Version, ec_level: EcLevel) -> QrResult<(Vec<u8>, Vec<u8>)> {
     let (block_1_size, block_1_count, block_2_size, block_2_count) = version.fetch(ec_level, &DATA_BYTES_PER_BLOCK)?;
@@ -112,18 +123,24 @@ pub fn construct_codewords(rawbits: &[u8], version: Version, ec_level: EcLevel) 
     let block_1_end = block_1_size * block_1_count;
     let total_size = block_1_end + block_2_size * block_2_count;
 
-    debug_assert_eq!(rawbits.len(), total_size);
+    // `rawbits` comes from the caller, so its length has to be checked rather
+    // than assumed: slicing it blind used to abort on a short input.
+    if rawbits.len() != total_size {
+        return Err(QrError::DataTooLong);
+    }
 
     // Divide the data into blocks.
     let mut blocks = Vec::with_capacity(blocks_count);
-    blocks.extend(rawbits[..block_1_end].chunks(block_1_size));
+    let (head, tail) = rawbits.split_at(block_1_end);
+    blocks.extend(head.chunks(block_1_size));
     if block_2_size > 0 {
-        blocks.extend(rawbits[block_1_end..].chunks(block_2_size));
+        blocks.extend(tail.chunks(block_2_size));
     }
 
     // Generate EC codes.
     let ec_bytes = version.fetch(ec_level, &EC_BYTES_PER_BLOCK)?;
-    let ec_codes = blocks.iter().map(|block| create_error_correction_code(block, ec_bytes)).collect::<Vec<Vec<u8>>>();
+    let ec_codes =
+        blocks.iter().map(|block| create_error_correction_code(block, ec_bytes)).collect::<QrResult<Vec<Vec<u8>>>>()?;
 
     let blocks_vec = interleave(&blocks);
     let ec_vec = interleave(&ec_codes);
@@ -139,7 +156,7 @@ mod construct_codewords_test {
     #[test]
     fn test_add_ec_simple() {
         let msg = b" [\x0bx\xd1r\xdcMC@\xec\x11\xec\x11\xec\x11";
-        let (blocks_vec, ec_vec) = construct_codewords(msg, Version::Normal(1), EcLevel::M).unwrap();
+        let (blocks_vec, ec_vec) = construct_codewords(msg, Version::normal(1).unwrap(), EcLevel::M).unwrap();
         assert_eq!(&*blocks_vec, msg);
         assert_eq!(&*ec_vec, b"\xc4#'w\xeb\xd7\xe7\xe2]\x17");
     }
@@ -157,7 +174,7 @@ mod construct_codewords_test {
                             \xe6\xac\x9a\xd1\xbdRo\x11\n\x02V\xa3l\x83\xa1\xa3\xf0 ox\xc0\xb2'\x85\
                             \x8d\xec";
 
-        let (blocks_vec, ec_vec) = construct_codewords(msg, Version::Normal(5), EcLevel::Q).unwrap();
+        let (blocks_vec, ec_vec) = construct_codewords(msg, Version::normal(5).unwrap(), EcLevel::Q).unwrap();
         assert_eq!(&*blocks_vec, &expected_blocks[..]);
         assert_eq!(&*ec_vec, &expected_ec[..]);
     }
@@ -173,13 +190,13 @@ mod construct_codewords_test {
 /// # Errors
 ///
 /// Returns `Err(QrError::InvalidVersion)` if it is not valid to use the
-///  `ec_level` for the given version (e.g. `Version::Micro(1)` with
+///  `ec_level` for the given version (e.g. `Version::micro(1)` with
 /// `EcLevel::H`).
 pub fn max_allowed_errors(version: Version, ec_level: EcLevel) -> QrResult<usize> {
     use crate::EcLevel::{L, M};
-    use crate::Version::{Micro, Normal};
+    use crate::types::VersionKind::{Micro, Normal};
 
-    let p = match (version, ec_level) {
+    let p = match (version.kind(), ec_level) {
         (Micro(2) | Normal(1), L) => 3,
         (Micro(_) | Normal(2), L) | (Micro(2) | Normal(1), M) => 2,
         (Normal(1), _) | (Normal(3), L) => 1,
@@ -200,45 +217,45 @@ mod max_allowed_errors_test {
 
     #[test]
     fn test_low_versions() {
-        assert_eq!(Ok(0), max_allowed_errors(Version::Micro(1), EcLevel::L));
+        assert_eq!(Ok(0), max_allowed_errors(Version::micro(1).unwrap(), EcLevel::L));
 
-        assert_eq!(Ok(1), max_allowed_errors(Version::Micro(2), EcLevel::L));
-        assert_eq!(Ok(2), max_allowed_errors(Version::Micro(2), EcLevel::M));
+        assert_eq!(Ok(1), max_allowed_errors(Version::micro(2).unwrap(), EcLevel::L));
+        assert_eq!(Ok(2), max_allowed_errors(Version::micro(2).unwrap(), EcLevel::M));
 
-        assert_eq!(Ok(2), max_allowed_errors(Version::Micro(3), EcLevel::L));
-        assert_eq!(Ok(4), max_allowed_errors(Version::Micro(3), EcLevel::M));
+        assert_eq!(Ok(2), max_allowed_errors(Version::micro(3).unwrap(), EcLevel::L));
+        assert_eq!(Ok(4), max_allowed_errors(Version::micro(3).unwrap(), EcLevel::M));
 
-        assert_eq!(Ok(3), max_allowed_errors(Version::Micro(4), EcLevel::L));
-        assert_eq!(Ok(5), max_allowed_errors(Version::Micro(4), EcLevel::M));
-        assert_eq!(Ok(7), max_allowed_errors(Version::Micro(4), EcLevel::Q));
+        assert_eq!(Ok(3), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::L));
+        assert_eq!(Ok(5), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::M));
+        assert_eq!(Ok(7), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::Q));
 
-        assert_eq!(Ok(2), max_allowed_errors(Version::Normal(1), EcLevel::L));
-        assert_eq!(Ok(4), max_allowed_errors(Version::Normal(1), EcLevel::M));
-        assert_eq!(Ok(6), max_allowed_errors(Version::Normal(1), EcLevel::Q));
-        assert_eq!(Ok(8), max_allowed_errors(Version::Normal(1), EcLevel::H));
+        assert_eq!(Ok(2), max_allowed_errors(Version::normal(1).unwrap(), EcLevel::L));
+        assert_eq!(Ok(4), max_allowed_errors(Version::normal(1).unwrap(), EcLevel::M));
+        assert_eq!(Ok(6), max_allowed_errors(Version::normal(1).unwrap(), EcLevel::Q));
+        assert_eq!(Ok(8), max_allowed_errors(Version::normal(1).unwrap(), EcLevel::H));
 
-        assert_eq!(Ok(4), max_allowed_errors(Version::Normal(2), EcLevel::L));
-        assert_eq!(Ok(8), max_allowed_errors(Version::Normal(2), EcLevel::M));
-        assert_eq!(Ok(11), max_allowed_errors(Version::Normal(2), EcLevel::Q));
-        assert_eq!(Ok(14), max_allowed_errors(Version::Normal(2), EcLevel::H));
+        assert_eq!(Ok(4), max_allowed_errors(Version::normal(2).unwrap(), EcLevel::L));
+        assert_eq!(Ok(8), max_allowed_errors(Version::normal(2).unwrap(), EcLevel::M));
+        assert_eq!(Ok(11), max_allowed_errors(Version::normal(2).unwrap(), EcLevel::Q));
+        assert_eq!(Ok(14), max_allowed_errors(Version::normal(2).unwrap(), EcLevel::H));
 
-        assert_eq!(Ok(7), max_allowed_errors(Version::Normal(3), EcLevel::L));
-        assert_eq!(Ok(13), max_allowed_errors(Version::Normal(3), EcLevel::M));
-        assert_eq!(Ok(18), max_allowed_errors(Version::Normal(3), EcLevel::Q));
-        assert_eq!(Ok(22), max_allowed_errors(Version::Normal(3), EcLevel::H));
+        assert_eq!(Ok(7), max_allowed_errors(Version::normal(3).unwrap(), EcLevel::L));
+        assert_eq!(Ok(13), max_allowed_errors(Version::normal(3).unwrap(), EcLevel::M));
+        assert_eq!(Ok(18), max_allowed_errors(Version::normal(3).unwrap(), EcLevel::Q));
+        assert_eq!(Ok(22), max_allowed_errors(Version::normal(3).unwrap(), EcLevel::H));
 
-        assert_eq!(Ok(10), max_allowed_errors(Version::Normal(4), EcLevel::L));
-        assert_eq!(Ok(18), max_allowed_errors(Version::Normal(4), EcLevel::M));
-        assert_eq!(Ok(26), max_allowed_errors(Version::Normal(4), EcLevel::Q));
-        assert_eq!(Ok(32), max_allowed_errors(Version::Normal(4), EcLevel::H));
+        assert_eq!(Ok(10), max_allowed_errors(Version::normal(4).unwrap(), EcLevel::L));
+        assert_eq!(Ok(18), max_allowed_errors(Version::normal(4).unwrap(), EcLevel::M));
+        assert_eq!(Ok(26), max_allowed_errors(Version::normal(4).unwrap(), EcLevel::Q));
+        assert_eq!(Ok(32), max_allowed_errors(Version::normal(4).unwrap(), EcLevel::H));
     }
 
     #[test]
     fn test_high_versions() {
-        assert_eq!(Ok(375), max_allowed_errors(Version::Normal(40), EcLevel::L));
-        assert_eq!(Ok(686), max_allowed_errors(Version::Normal(40), EcLevel::M));
-        assert_eq!(Ok(1020), max_allowed_errors(Version::Normal(40), EcLevel::Q));
-        assert_eq!(Ok(1215), max_allowed_errors(Version::Normal(40), EcLevel::H));
+        assert_eq!(Ok(375), max_allowed_errors(Version::normal(40).unwrap(), EcLevel::L));
+        assert_eq!(Ok(686), max_allowed_errors(Version::normal(40).unwrap(), EcLevel::M));
+        assert_eq!(Ok(1020), max_allowed_errors(Version::normal(40).unwrap(), EcLevel::Q));
+        assert_eq!(Ok(1215), max_allowed_errors(Version::normal(40).unwrap(), EcLevel::H));
     }
 }
 

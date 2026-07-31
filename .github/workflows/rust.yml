@@ -8,84 +8,98 @@ on:
     branches:
       - master
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        rustc: [1.70.0, stable] # MSVR and current stable rustc
+        rustc: [1.95.0, stable] # MSRV and current stable rustc
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
         with:
-          profile: minimal
           toolchain: ${{ matrix.rustc }}
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
+      - run: cargo check --all-targets
 
   test:
     name: Test Suite
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # `bench` is deliberately excluded: it needs the unstable `test` crate,
+        # so it builds on nightly only -- which is also why `--all-features`
+        # cannot be used anywhere in this workflow.
+        features: ["", "--no-default-features", "--no-default-features --features std"]
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test ${{ matrix.features }}
 
-  no_std:
-    name: Test Suite (no_std)
+  no_panic:
+    name: No-panic sweep
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --no-default-features
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Release is the profile the guarantee is about: the numeric conversions
+      # used to check only under `debug_assertions` and wrap silently otherwise.
+      - run: cargo test --release --test no_panic
+      - run: cargo test --release --no-default-features --test no_panic
+
+  fuzz:
+    name: Fuzz (smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-fuzz
+      # A short campaign per target on every push; long runs happen out of band.
+      # The rss limit is explicit because a caller is allowed to ask for an
+      # image far larger than the runner has memory for -- that is documented
+      # behaviour, not a finding, and the targets stay inside it by design.
+      - run: cargo fuzz run encode -- -max_total_time=120 -rss_limit_mb=2048
+      - run: cargo fuzz run render -- -max_total_time=120 -rss_limit_mb=2048
 
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
           components: rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+      - run: cargo fmt --all -- --check
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
           components: clippy
-      - name: Run cargo clippy
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          # args: --all-features # TODO use `criterion` instead for benchmarks.
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --no-default-features -- -D warnings
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc --no-deps

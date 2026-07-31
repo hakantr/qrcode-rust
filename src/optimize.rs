@@ -125,7 +125,9 @@ impl Iterator for Parser<'_> {
 
         loop {
             let (i, ecs) = self.ecs_iter.next()?;
-            let (next_state, action) = STATE_TRANSITION[self.state as usize + ecs as usize];
+            // `State` is a multiple of 10 up to 60 and `ExclCharSet` is 0..=9,
+            // so the sum indexes the 70-entry table exactly.
+            let (next_state, action) = *STATE_TRANSITION.get(self.state as usize + ecs as usize)?;
             self.state = next_state;
 
             let old_begin = self.begin;
@@ -340,7 +342,7 @@ pub fn total_encoded_len(segments: &[Segment], version: Version) -> usize {
 
 #[cfg(test)]
 mod optimize_tests {
-    use crate::optimize::{total_encoded_len, Optimizer, Segment};
+    use crate::optimize::{Optimizer, Segment, total_encoded_len};
     use crate::types::{Mode, Version};
     use alloc::vec::Vec;
 
@@ -367,7 +369,7 @@ mod optimize_tests {
                 Segment { mode: Mode::Byte, begin: 6, end: 10 },
             ],
             &[Segment { mode: Mode::Alphanumeric, begin: 0, end: 6 }, Segment { mode: Mode::Byte, begin: 6, end: 10 }],
-            Version::Normal(1),
+            Version::normal(1).unwrap(),
         );
     }
 
@@ -385,7 +387,7 @@ mod optimize_tests {
                 Segment { mode: Mode::Numeric, begin: 0, end: 29 },
                 Segment { mode: Mode::Alphanumeric, begin: 29, end: 38 },
             ],
-            Version::Normal(9),
+            Version::normal(9).unwrap(),
         );
     }
 
@@ -399,7 +401,7 @@ mod optimize_tests {
                 Segment { mode: Mode::Kanji, begin: 6, end: 8 },
             ],
             &[Segment { mode: Mode::Byte, begin: 0, end: 8 }],
-            Version::Normal(1),
+            Version::normal(1).unwrap(),
         );
     }
 
@@ -408,7 +410,7 @@ mod optimize_tests {
         test_optimization_result(
             &[Segment { mode: Mode::Kanji, begin: 0, end: 10 }, Segment { mode: Mode::Byte, begin: 10, end: 11 }],
             &[Segment { mode: Mode::Kanji, begin: 0, end: 10 }, Segment { mode: Mode::Byte, begin: 10, end: 11 }],
-            Version::Normal(1),
+            Version::normal(1).unwrap(),
         );
     }
 
@@ -423,7 +425,7 @@ mod optimize_tests {
                 Segment { mode: Mode::Numeric, begin: 0, end: 3 },
                 Segment { mode: Mode::Alphanumeric, begin: 3, end: 4 },
             ],
-            Version::Micro(2),
+            Version::micro(2).unwrap(),
         );
     }
 
@@ -435,7 +437,7 @@ mod optimize_tests {
                 Segment { mode: Mode::Alphanumeric, begin: 2, end: 4 },
             ],
             &[Segment { mode: Mode::Alphanumeric, begin: 0, end: 4 }],
-            Version::Micro(2),
+            Version::micro(2).unwrap(),
         );
     }
 
@@ -447,7 +449,7 @@ mod optimize_tests {
                 Segment { mode: Mode::Alphanumeric, begin: 3, end: 4 },
             ],
             &[Segment { mode: Mode::Alphanumeric, begin: 0, end: 4 }],
-            Version::Micro(3),
+            Version::micro(3).unwrap(),
         );
     }
 }
@@ -475,7 +477,7 @@ fn bench_optimize(bencher: &mut test::Bencher) {
                  \x83}\x81[\x83g\x83t\x83H\x83\x93\x82\xcc\x95\x81\x8by\x82\xc8\x82\xc7\x82\xc9\
                  \x82\xe6\x82\xe8\x93\xfa\x96{\x82\xc9\x8c\xc0\x82\xe7\x82\xb8\x90\xa2\x8aE\x93I\
                  \x82\xc9\x95\x81\x8by\x82\xb5\x82\xc4\x82\xa2\x82\xe9\x81B";
-    bencher.iter(|| Parser::new(data).optimize(Version::Normal(15)));
+    bencher.iter(|| Parser::new(data).optimize(Version::normal(15).unwrap()));
 }
 
 //}}}

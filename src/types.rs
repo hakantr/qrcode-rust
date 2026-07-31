@@ -29,6 +29,16 @@ pub enum QrError {
 
     /// A character not belonging to the character set is found.
     InvalidCharacter,
+
+    /// The mask pattern is not supported by the QR code version. Micro QR codes
+    /// only allow 4 of the 8 patterns.
+    InvalidMaskPattern,
+
+    /// A coordinate lies outside of the QR code symbol.
+    CoordinateOutOfRange,
+
+    /// The requested image is too large to be represented.
+    ImageTooLarge,
 }
 
 impl Display for QrError {
@@ -39,13 +49,17 @@ impl Display for QrError {
             Self::UnsupportedCharacterSet => "unsupported character set",
             Self::InvalidEciDesignator => "invalid ECI designator",
             Self::InvalidCharacter => "invalid character",
+            Self::InvalidMaskPattern => "invalid mask pattern for this version",
+            Self::CoordinateOutOfRange => "coordinate out of range",
+            Self::ImageTooLarge => "image too large",
         };
         fmt.write_str(msg)
     }
 }
 
-#[cfg(feature = "std")]
-impl ::std::error::Error for QrError {}
+// `core::error::Error` was stabilized in Rust 1.81 and `std::error::Error` is a
+// re-export of it, so this single impl covers both `std` and `no_std` builds.
+impl core::error::Error for QrError {}
 
 /// `QrResult` is a convenient alias for a QR code generation result.
 pub type QrResult<T> = Result<T, QrError>;
@@ -117,74 +131,154 @@ pub enum EcLevel {
 //------------------------------------------------------------------------------
 //{{{ Version
 
+/// The number of entries in the hard-coded per-version tables: 40 QR code
+/// versions followed by 4 Micro QR code versions.
+pub const VERSION_COUNT: usize = 44;
+
+/// Which family a [`Version`] belongs to, and its number within that family.
+///
+/// This is the shape a `Version` is matched on internally. It is deliberately
+/// not part of the public API: a `Version` can only be built through
+/// [`Version::normal`] or [`Version::micro`], which is what makes every
+/// per-version table lookup in this crate infallible.
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub(crate) enum VersionKind {
+    /// A normal QR code version, between 1 and 40.
+    Normal(i16),
+
+    /// A Micro QR code version, between 1 and 4.
+    Micro(i16),
+}
+
 /// In QR code terminology, `Version` means the size of the generated image.
 /// Larger version means the size of code is larger, and therefore can carry
 /// more information.
 ///
-/// The smallest version is `Version::Normal(1)` of size 21×21, and the largest
-/// is `Version::Normal(40)` of size 177×177.
+/// The smallest version is `Version::normal(1)` of size 21×21, and the largest
+/// is `Version::normal(40)` of size 177×177.
+///
+/// A `Version` is validated on construction, so it can never name a symbol the
+/// standard does not define. Every operation taking a `Version` is therefore
+/// total: none of them can panic on the version's account.
+///
+/// ```
+/// use qrcode::Version;
+///
+/// assert_eq!(Version::normal(1).unwrap().width(), 21);
+/// assert_eq!(Version::normal(40).unwrap().width(), 177);
+/// assert_eq!(Version::micro(4).unwrap().width(), 17);
+///
+/// assert!(Version::normal(41).is_err());
+/// assert!(Version::micro(0).is_err());
+/// ```
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub enum Version {
-    /// A normal QR code version. The parameter should be between 1 and 40.
-    Normal(i16),
-
-    /// A Micro QR code version. The parameter should be between 1 and 4.
-    Micro(i16),
+pub struct Version {
+    kind: VersionKind,
 }
 
 impl Version {
+    /// Constructs a normal QR code version.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(QrError::InvalidVersion)` unless `number` is between 1 and
+    /// 40 inclusive.
+    pub const fn normal(number: i16) -> QrResult<Self> {
+        match number {
+            1..=40 => Ok(Self { kind: VersionKind::Normal(number) }),
+            _ => Err(QrError::InvalidVersion),
+        }
+    }
+
+    /// Constructs a Micro QR code version.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(QrError::InvalidVersion)` unless `number` is between 1 and
+    /// 4 inclusive.
+    pub const fn micro(number: i16) -> QrResult<Self> {
+        match number {
+            1..=4 => Ok(Self { kind: VersionKind::Micro(number) }),
+            _ => Err(QrError::InvalidVersion),
+        }
+    }
+
+    /// The version number within its family, i.e. 1 to 40 for a normal QR code
+    /// and 1 to 4 for a Micro QR code.
+    pub const fn number(self) -> i16 {
+        match self.kind {
+            VersionKind::Normal(v) | VersionKind::Micro(v) => v,
+        }
+    }
+
+    pub(crate) const fn kind(self) -> VersionKind {
+        self.kind
+    }
+
     /// Get the number of "modules" on each size of the QR code, i.e. the width
     /// and height of the code.
+    ///
+    /// The result is between 11 and 177, so `width * width` always fits in an
+    /// `i16`.
     pub const fn width(self) -> i16 {
-        match self {
-            Self::Normal(v) => v * 4 + 17,
-            Self::Micro(v) => v * 2 + 9,
+        match self.kind {
+            VersionKind::Normal(v) => v * 4 + 17,
+            VersionKind::Micro(v) => v * 2 + 9,
+        }
+    }
+
+    /// The index of this version in a per-version table, i.e. 0 to 39 for a
+    /// normal QR code and 40 to 43 for a Micro QR code.
+    #[expect(clippy::cast_sign_loss, reason = "the constructors confine both numbers to 1..=40")]
+    pub(crate) const fn table_index(self) -> usize {
+        // Both arms are in 0..VERSION_COUNT by construction.
+        match self.kind {
+            VersionKind::Normal(v) => (v as usize) - 1,
+            VersionKind::Micro(v) => (v as usize) + 39,
         }
     }
 
     /// Obtains an object from a hard-coded table.
     ///
-    /// The table must be a 44×4 array. The outer array represents the content
-    /// for each version. The first 40 entry corresponds to QR code versions 1
-    /// to 40, and the last 4 corresponds to Micro QR code version 1 to 4. The
-    /// inner array represents the content in each error correction level, in
-    /// the order [L, M, Q, H].
+    /// The first 40 entries correspond to QR code versions 1 to 40, and the
+    /// last 4 to Micro QR code versions 1 to 4. The inner array represents the
+    /// content in each error correction level, in the order [L, M, Q, H].
+    ///
+    /// The table length is fixed by the signature, and a `Version` is always in
+    /// range, so the lookup itself cannot fail.
     ///
     /// # Errors
     ///
     /// If the entry compares equal to the default value of `T`, this method
-    /// returns `Err(QrError::InvalidVersion)`.
-    pub fn fetch<T>(self, ec_level: EcLevel, table: &[[T; 4]]) -> QrResult<T>
+    /// returns `Err(QrError::InvalidVersion)`. This is how the Micro QR code
+    /// versions reject the error correction levels they do not support.
+    pub fn fetch<T>(self, ec_level: EcLevel, table: &[[T; 4]; VERSION_COUNT]) -> QrResult<T>
     where
         T: PartialEq + Default + Copy,
     {
-        match self {
-            Self::Normal(v @ 1..=40) => {
-                return Ok(table[(v - 1).as_usize()][ec_level as usize]);
-            }
-            Self::Micro(v @ 1..=4) => {
-                let obj = table[(v + 39).as_usize()][ec_level as usize];
-                if obj != T::default() {
-                    return Ok(obj);
-                }
-            }
-            _ => {}
-        }
-        Err(QrError::InvalidVersion)
+        // `table_index()` is 0..VERSION_COUNT and `ec_level` is 0..4 by
+        // construction, so both lookups always hit.
+        let obj = table
+            .get(self.table_index())
+            .and_then(|row| row.get(ec_level as usize))
+            .copied()
+            .ok_or(QrError::InvalidVersion)?;
+        if obj == T::default() { Err(QrError::InvalidVersion) } else { Ok(obj) }
     }
 
     /// The number of bits needed to encode the mode indicator.
-    pub fn mode_bits_count(self) -> usize {
-        if let Self::Micro(a) = self {
-            (a - 1).as_usize()
-        } else {
-            4
+    #[expect(clippy::cast_sign_loss, reason = "Version::micro confines the number to 1..=4")]
+    pub const fn mode_bits_count(self) -> usize {
+        match self.kind {
+            // Micro versions are 1..=4, so this never underflows.
+            VersionKind::Micro(a) => (a as usize) - 1,
+            VersionKind::Normal(_) => 4,
         }
     }
 
     /// Checks whether is version refers to a Micro QR code.
     pub const fn is_micro(self) -> bool {
-        matches!(self, Self::Micro(_))
+        matches!(self.kind, VersionKind::Micro(_))
     }
 }
 
@@ -215,14 +309,14 @@ impl Mode {
     /// ```
     /// use qrcode::types::{Mode, Version};
     ///
-    /// assert_eq!(Mode::Numeric.length_bits_count(Version::Normal(1)), 10);
+    /// assert_eq!(Mode::Numeric.length_bits_count(Version::normal(1).unwrap()), 10);
     /// ```
     ///
     /// This method will return `Err(QrError::UnsupportedCharacterSet)` if the
     /// mode is not supported in the given version.
     pub fn length_bits_count(self, version: Version) -> usize {
-        match version {
-            Version::Micro(a) => {
+        match version.kind() {
+            VersionKind::Micro(a) => {
                 let a = a.as_usize();
                 match self {
                     Self::Numeric => 2 + a,
@@ -230,18 +324,18 @@ impl Mode {
                     Self::Kanji => a,
                 }
             }
-            Version::Normal(1..=9) => match self {
+            VersionKind::Normal(1..=9) => match self {
                 Self::Numeric => 10,
                 Self::Alphanumeric => 9,
                 Self::Byte | Self::Kanji => 8,
             },
-            Version::Normal(10..=26) => match self {
+            VersionKind::Normal(10..=26) => match self {
                 Self::Numeric => 12,
                 Self::Alphanumeric => 11,
                 Self::Byte => 16,
                 Self::Kanji => 10,
             },
-            Version::Normal(_) => match self {
+            VersionKind::Normal(_) => match self {
                 Self::Numeric => 14,
                 Self::Alphanumeric => 13,
                 Self::Byte => 16,
@@ -262,8 +356,8 @@ impl Mode {
     /// i.e. half the total size of bytes.
     pub const fn data_bits_count(self, raw_data_len: usize) -> usize {
         match self {
-            Self::Numeric => (raw_data_len * 10 + 2) / 3,
-            Self::Alphanumeric => (raw_data_len * 11 + 1) / 2,
+            Self::Numeric => (raw_data_len * 10).div_ceil(3),
+            Self::Alphanumeric => (raw_data_len * 11).div_ceil(2),
             Self::Byte => raw_data_len * 8,
             Self::Kanji => raw_data_len * 13,
         }
@@ -308,6 +402,7 @@ mod mode_tests {
     use crate::types::Mode::{Alphanumeric, Byte, Kanji, Numeric};
 
     #[test]
+    #[expect(clippy::neg_cmp_op_on_partial_ord, reason = "asserting that the two modes are incomparable")]
     fn test_mode_order() {
         assert!(Numeric < Alphanumeric);
         assert!(Byte > Kanji);

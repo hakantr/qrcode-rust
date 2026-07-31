@@ -60,7 +60,8 @@ impl RenderCanvas for Canvas {
     }
 
     fn draw_dark_rect(&mut self, left: u32, top: u32, width: u32, height: u32) {
-        writeln!(self.pic, "p({left},{top},{width},{height})").unwrap();
+        // Writing into a `String` is infallible.
+        let _ = writeln!(self.pic, "p({left},{top},{width},{height})");
     }
 
     fn into_image(self) -> String {

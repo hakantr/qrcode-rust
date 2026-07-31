@@ -68,7 +68,9 @@ impl<'a> RenderCanvas for Canvas<'a> {
     }
 
     fn draw_dark_rect(&mut self, left: u32, top: u32, width: u32, height: u32) {
-        write!(self.svg, "M{left} {top}h{width}v{height}h-{width}z").unwrap();
+        // Writing into a `String` is infallible; the `Result` only exists to
+        // satisfy the `fmt::Write` signature.
+        let _ = write!(self.svg, "M{left} {top}h{width}v{height}h-{width}z");
     }
 
     fn into_image(mut self) -> String {
