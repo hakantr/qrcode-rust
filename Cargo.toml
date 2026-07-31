@@ -1,6 +1,6 @@
 [package]
 name = "qrcode"
-description = "QR code encoder in Rust"
+description = "Rust ile QR kodu kodlayıcı"
 license = "MIT OR Apache-2.0"
 version = "0.15.0"
 edition = "2024"
@@ -10,7 +10,7 @@ keywords = ["qrcode"]
 categories = ["encoding", "multimedia::images"]
 repository = "https://github.com/kennytm/qrcode-rust"
 readme = "README.md"
-documentation = "http://docs.rs/qrcode"
+documentation = "https://docs.rs/qrcode"
 exclude = [
     "fuzz/**",
     ".travis.yml", ".gitignore", "test-data/**"
@@ -19,11 +19,12 @@ exclude = [
 [badges]
 maintenance = { status = "passively-maintained" }
 
-# The crate's contract is that a valid input never aborts the process and an
-# invalid one comes back as a `QrError`. These lints are what keep that true:
-# every remaining panicking construct has to be introduced deliberately, with an
-# `#[expect(..., reason = "...")]` saying why it cannot fire. See tests/no_panic.rs
-# for the runtime half of the same guarantee.
+# Kamu API'sine verilen geçersiz dış girdiler, olağan çalışma zamanı hataları ve
+# desteklenmeyen seçenekler kasıtlı olarak paniklemez; yapılandırılmış bir
+# `QrError` döndürür. Kalan panik üretebilen yapılar yalnızca belgelenmiş çağıran
+# sözleşmeleri veya kütüphanenin iç değişmezleri içindir ve her biri gerekçeli bir
+# `#[expect(...)]` ile açıkça işaretlenir. Çalışma zamanı denetimleri için
+# `tests/no_panic.rs` dosyasına bakın.
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 indexing_slicing = "deny"
@@ -40,13 +41,12 @@ must_use_candidate = "allow"
 image = { version = "0.25", default-features = false, optional = true }
 
 [dev-dependencies]
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [features]
 default = ["std", "image", "svg", "pic", "eps"]
 image = ["dep:image", "std"]
 std = []
-bench = []
 svg = []
 pic = []
 eps = []

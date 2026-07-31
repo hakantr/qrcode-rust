@@ -13,65 +13,63 @@ env:
 
 jobs:
   check:
-    name: Check
+    name: Denetim
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        rustc: [1.95.0, stable] # MSRV and current stable rustc
+        rustc: [1.95.0, stable] # MSRV ve güncel kararlı rustc
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rustc }}
-      - run: cargo check --all-targets
+      - run: cargo check --all-features --all-targets
 
   test:
-    name: Test Suite
+    name: Test paketi
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        # `bench` is deliberately excluded: it needs the unstable `test` crate,
-        # so it builds on nightly only -- which is also why `--all-features`
-        # cannot be used anywhere in this workflow.
-        features: ["", "--no-default-features", "--no-default-features --features std"]
+        # Özelliklerin tamamını ve en küçük `no_std` bileşimlerini ayrı ayrı sına.
+        features: ["--all-features", "--no-default-features", "--no-default-features --features std"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test ${{ matrix.features }}
 
   no_panic:
-    name: No-panic sweep
+    name: Paniksiz API taraması
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      # Release is the profile the guarantee is about: the numeric conversions
-      # used to check only under `debug_assertions` and wrap silently otherwise.
+      # Garanti release profilini de kapsar: sayısal dönüşümler eskiden yalnızca
+      # `debug_assertions` altında denetleniyor, aksi hâlde sessizce sarılıyordu.
       - run: cargo test --release --test no_panic
       - run: cargo test --release --no-default-features --test no_panic
 
   fuzz:
-    name: Fuzz (smoke)
+    name: Fuzz (hızlı tarama)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - uses: taiki-e/install-action@cargo-fuzz
-      # A short campaign per target on every push; long runs happen out of band.
-      # The rss limit is explicit because a caller is allowed to ask for an
-      # image far larger than the runner has memory for -- that is documented
-      # behaviour, not a finding, and the targets stay inside it by design.
+      # Her push'ta hedef başına kısa bir tur; uzun çalışmalar ayrıca yürütülür.
+      # RSS sınırı açıktır: çağıran, runner belleğinden büyük ama piksel sınırının
+      # altında bir görüntü isteyebilir. Bu belgelenmiş davranıştır; fuzz hedefleri
+      # tasarım gereği bu bütçenin içinde kalır.
       - run: cargo fuzz run encode -- -max_total_time=120 -rss_limit_mb=2048
       - run: cargo fuzz run render -- -max_total_time=120 -rss_limit_mb=2048
 
   fmt:
-    name: Rustfmt
+    name: Biçim
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -94,7 +92,7 @@ jobs:
       - run: cargo clippy --all-targets --no-default-features -- -D warnings
 
   docs:
-    name: Docs
+    name: Belgeler
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
