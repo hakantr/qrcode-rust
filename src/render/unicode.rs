@@ -35,10 +35,14 @@ impl Dense1x2 {
             Self::Light => 0,
         }
     }
+    #[expect(clippy::expect_used, reason = "sym iki adet 0/1 piksel değerinden kurulur ve 0..=3 aralığındadır")]
     fn parse_2_bits(sym: u8) -> &'static str {
         // `sym`, iki `value()` sonucundan kurulan 2 bitlik bir değerdir; bu yüzden
         // her zaman 4 girdilik kod sayfasını indeksler.
-        CODEPAGE.get(usize::from(sym)).copied().unwrap_or(" ")
+        CODEPAGE
+            .get(usize::from(sym))
+            .copied()
+            .expect("Unicode tuvali iç değişmezi: iki bitlik sembol kod sayfasında bulunmalı")
     }
 }
 
@@ -53,8 +57,14 @@ impl RenderCanvas for Canvas1x2 {
     type Pixel = Dense1x2;
     type Image = String;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Renderer alanı önceden MAX_IMAGE_PIXELS ile sınırlar; doğrudan Canvas çağrısı aynı sözleşmeye uymalıdır"
+    )]
     fn new(width: u32, height: u32, dark_pixel: Dense1x2, light_pixel: Dense1x2) -> Self {
-        let a = vec![light_pixel.value(); (width * height) as usize];
+        let area = u64::from(width) * u64::from(height);
+        let area = usize::try_from(area).expect("Unicode tuvali boyutu bu platformda temsil edilebilmeli");
+        let a = vec![light_pixel.value(); area];
         Self { width, canvas: a, dark_pixel: dark_pixel.value() }
     }
 
@@ -65,6 +75,9 @@ impl RenderCanvas for Canvas1x2 {
     }
 
     fn into_image(self) -> String {
+        if self.width == 0 {
+            return String::new();
+        }
         self.canvas
             // Diziyi 1 satırlık parçalara bölüyoruz
             .chunks_exact(self.width as usize)

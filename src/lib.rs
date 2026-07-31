@@ -26,7 +26,6 @@
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "bench", feature(test))] // Kararsız kütüphaneler
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![warn(missing_docs)]
 // Testlerin sert olmasına izin var: bir testteki `unwrap` çağırana sızan bir
@@ -43,8 +42,6 @@
         reason = "test kodu panikleyerek doğrulama yapar"
     )
 )]
-#![cfg_attr(feature = "bench", doc = include_str!("../README.md"))]
-// ^ README.md'mizi test edebildiğimizden emin oluyoruz.
 
 extern crate alloc;
 
@@ -151,16 +148,14 @@ impl QrCode {
     /// Ayrıntı için `Bits` yapısına bakın.
     ///
     /// ```
-    /// #![allow(unused_must_use)]
-    ///
     /// use qrcode::bits::Bits;
     /// use qrcode::{EcLevel, QrCode, Version};
     ///
     /// let mut bits = Bits::new(Version::normal(1).unwrap());
-    /// bits.push_eci_designator(9);
-    /// bits.push_byte_data(b"\xca\xfe\xe4\xe9\xea\xe1\xf2 QR");
-    /// bits.push_terminator(EcLevel::L);
-    /// let qrcode = QrCode::with_bits(bits, EcLevel::L);
+    /// bits.push_eci_designator(9).unwrap();
+    /// bits.push_byte_data(b"\xca\xfe\xe4\xe9\xea\xe1\xf2 QR").unwrap();
+    /// bits.push_terminator(EcLevel::L).unwrap();
+    /// let _qrcode = QrCode::with_bits(bits, EcLevel::L).unwrap();
     /// ```
     ///
     /// # Errors
@@ -173,7 +168,7 @@ impl QrCode {
         let (encoded_data, ec_data) = ec::construct_codewords(&data, version, ec_level)?;
         let mut canvas = canvas::Canvas::new(version, ec_level);
         canvas.draw_all_functional_patterns();
-        canvas.draw_data(&encoded_data, &ec_data);
+        canvas.draw_data(&encoded_data, &ec_data)?;
         let canvas = canvas.apply_best_mask()?;
         Ok(Self { content: canvas.into_colors(), version, ec_level, width: version.width().as_usize() })
     }
@@ -200,8 +195,18 @@ impl QrCode {
     ///
     /// Bir `QrCode` yalnızca standardın tanımladığı bir sürüm ve hata düzeltme
     /// seviyesi için var olabilir, dolayısıyla bu arama başarısız olamaz.
+    ///
+    /// # Panics
+    ///
+    /// Yalnızca özel `QrCode` alanları bu kurulum değişmezini ihlal ederse
+    /// panikler.
     pub fn max_allowed_errors(&self) -> usize {
-        ec::max_allowed_errors(self.version, self.ec_level).unwrap_or(0)
+        #[expect(
+            clippy::expect_used,
+            reason = "QrCode yalnızca doğrulanmış bir sürüm/hata düzeltme çiftiyle kurulabilir"
+        )]
+        ec::max_allowed_errors(self.version, self.ec_level)
+            .expect("QrCode iç değişmezi: sürüm ve hata düzeltme seviyesi geçerli olmalı")
     }
 
     /// (x, y) koordinatındaki modülün işlevsel bir modül olup olmadığını, ya da
@@ -210,7 +215,7 @@ impl QrCode {
         if x >= self.width || y >= self.width {
             return None;
         }
-        Some(canvas::is_functional(self.version, self.version.width(), x.as_i16(), y.as_i16()))
+        Some(canvas::is_functional(self.version, x.as_i16(), y.as_i16()))
     }
 
     /// (x, y) koordinatındaki modülün işlevsel bir modül olup olmadığını kontrol
@@ -246,14 +251,14 @@ impl QrCode {
 
     /// QR kodunu bir bool vektörüne dönüştürür. Her girdi modülün rengini temsil
     /// eder; "true" koyu, "false" açık demektir.
-    #[deprecated(since = "0.4.0", note = "use `to_colors()` instead")]
+    #[deprecated(since = "0.4.0", note = "bunun yerine `to_colors()` kullanın")]
     pub fn to_vec(&self) -> Vec<bool> {
         self.content.iter().map(|c| *c != Color::Light).collect()
     }
 
     /// QR kodunu bir bool vektörüne dönüştürür. Her girdi modülün rengini temsil
     /// eder; "true" koyu, "false" açık demektir.
-    #[deprecated(since = "0.4.0", note = "use `into_colors()` instead")]
+    #[deprecated(since = "0.4.0", note = "bunun yerine `into_colors()` kullanın")]
     pub fn into_vec(self) -> Vec<bool> {
         self.content.into_iter().map(|c| c != Color::Light).collect()
     }
@@ -271,7 +276,7 @@ impl QrCode {
     /// QR kodunu bir görüntüye çizer. Sonuç bir görüntü kurucusudur; somut bir
     /// görüntüye kopyalamadan önce ek yapılandırma yapabilirsiniz.
     ///
-    /// # Examples
+    /// # Örnekler
     ///
     /// ```
     /// # #[cfg(feature = "image")]
@@ -380,7 +385,7 @@ mod smoke_tests {
     use alloc::vec::Vec;
 
     /// Kodlama, standardın tanımladığı her sürüm ve hata düzeltme seviyesi için
-    /// başarılı olmalı ve süreci abort etmemeli. Micro sürüm M1 ve M3, sondaki
+    /// başarılı olmalı ve süreci sonlandırmamalı. Micro sürüm M1 ve M3, sondaki
     /// yarım kod kelimesini doldururken taşıyor ve `QrCode::with_version`'ı da
     /// kendileriyle birlikte çökertiyordu.
     #[test]

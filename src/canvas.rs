@@ -6,9 +6,9 @@
 //!
 //! let mut c = Canvas::new(Version::normal(1).unwrap(), EcLevel::L);
 //! c.draw_all_functional_patterns();
-//! c.draw_data(b"data_here", b"ec_code_here");
-//! c.apply_mask(MaskPattern::Checkerboard);
-//! let bools = c.to_bools();
+//! c.draw_data(&[0; 19], &[0; 7]).unwrap();
+//! c.try_apply_mask(MaskPattern::Checkerboard).unwrap();
+//! let colors = c.into_colors();
 //! ```
 
 use alloc::boxed::Box;
@@ -20,7 +20,7 @@ use crate::cast::As;
 use crate::types::{Color, EcLevel, QrError, QrResult, Version, VersionKind};
 
 //------------------------------------------------------------------------------
-//{{{ Modules
+//{{{ Modüller
 
 /// QR kodundaki bir modülün (pikselin) rengi.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -76,7 +76,7 @@ impl Module {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Canvas
+//{{{ Tuval
 
 /// `Canvas`, hata düzeltmesi yapılmış veriyi bir QR koduna çizmek için
 /// kullanılan ara yardımcı yapıdır.
@@ -97,6 +97,40 @@ pub struct Canvas {
 }
 
 impl Canvas {
+    /// İşlevsel desenleri, veri bitlerini ve artakalan modülleri maskeleme
+    /// öncesindeki beklenen yapıya karşı doğrular.
+    fn validate_ready_for_mask(&self) -> QrResult<()> {
+        for y in 0..self.width {
+            for x in 0..self.width {
+                if is_functional(self.version, x, y) && !matches!(self.get(x, y), Module::Masked(_)) {
+                    return Err(QrError::InvalidCanvasState);
+                }
+            }
+        }
+
+        let (data_words, ec_words) = crate::ec::codeword_lengths(self.version, self.ec_level)?;
+        let half_codeword = usize::from(matches!(self.version.kind(), VersionKind::Micro(1 | 3)));
+        let expected_bits = (data_words + ec_words) * 8 - half_codeword * 4;
+        let mut visited_bits = 0_usize;
+
+        for (x, y) in DataModuleIter::new(self.version).filter(|&(x, y)| !is_functional(self.version, x, y)) {
+            let expected = if visited_bits < expected_bits {
+                matches!(self.get(x, y), Module::Unmasked(_))
+            } else {
+                self.get(x, y) == Module::Empty
+            };
+            if !expected {
+                return Err(QrError::InvalidCanvasState);
+            }
+            visited_bits += 1;
+        }
+
+        if visited_bits < expected_bits {
+            return Err(QrError::InvalidCanvasState);
+        }
+        Ok(())
+    }
+
     /// Verilen sürümdeki bir QR kodu için yeterince büyük yeni bir tuval kurar.
     pub fn new(version: Version, ec_level: EcLevel) -> Self {
         let width = version.width();
@@ -273,7 +307,7 @@ mod basic_canvas_tests {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Finder patterns
+//{{{ Bulucu desenleri
 
 impl Canvas {
     /// Merkezi (x, y) olan tek bir bulucu deseni çizer.
@@ -373,7 +407,7 @@ mod finder_pattern_tests {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Alignment patterns
+//{{{ Hizalama desenleri
 
 impl Canvas {
     /// Merkezi (x, y) olan bir hizalama deseni çizer.
@@ -399,14 +433,21 @@ impl Canvas {
     ///
     /// Hizalama desenleri, tarayıcının kare ızgarayı oluşturmasına yardımcı olmak
     /// için QR kodu sembolünün içindeki 5×5 kare desenlerdir.
+    #[expect(
+        clippy::expect_used,
+        reason = "doğrulanmış normal sürüm 7..=40, 34 satırlık hizalama tablosunu tam indeksler"
+    )]
     fn draw_alignment_patterns(&mut self) {
         match self.version.kind() {
             VersionKind::Micro(_) | VersionKind::Normal(1) => {}
             VersionKind::Normal(2..=6) => self.draw_alignment_pattern_at(-7, -7),
             VersionKind::Normal(a) => {
-                // `a` burada 7..=40 aralığındadır, yani indeks 0..=33 ve tablonun 34 satırı
-                // var; boş bir yedek bunu her hâlükârda total tutar.
-                let positions = ALIGNMENT_PATTERN_POSITIONS.get((a - 7).as_usize()).copied().unwrap_or(&[]);
+                // `a` burada 7..=40 aralığındadır, yani indeks 0..=33 ve
+                // tablonun 34 satırı vardır.
+                let positions = ALIGNMENT_PATTERN_POSITIONS
+                    .get((a - 7).as_usize())
+                    .copied()
+                    .expect("sürüm iç değişmezi: hizalama satırı bulunmalı");
                 for x in positions {
                     for y in positions {
                         self.draw_alignment_pattern_at(*x, *y);
@@ -593,7 +634,7 @@ static ALIGNMENT_PATTERN_POSITIONS: [&[i16]; 34] = [
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Timing patterns
+//{{{ Zamanlama desenleri
 
 impl Canvas {
     /// (x1, y1)'den (x2, y2)'ye, uçlar dahil bir çizgi çizer.
@@ -604,7 +645,7 @@ impl Canvas {
     /// Çift koordinatlarda `color_even`, tek koordinatlarda ise `color_odd`
     /// çizilir. Zamanlama deseni böylece bu metotla çizilebilir.
     fn draw_line(&mut self, x1: i16, y1: i16, x2: i16, y2: i16, color_even: Color, color_odd: Color) {
-        debug_assert!(x1 == x2 || y1 == y2);
+        assert!(x1 == x2 || y1 == y2, "tuval iç değişmezi: çizgi yatay ya da dikey olmalı");
 
         if y1 == y2 {
             // Yatay çizgi.
@@ -695,7 +736,7 @@ mod timing_pattern_tests {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Format info & Version info
+//{{{ Biçim bilgisi ve sürüm bilgisi
 
 impl Canvas {
     /// Verilen koordinatlarla tuvale büyük-endian bir tam sayı çizer.
@@ -733,12 +774,18 @@ impl Canvas {
     }
 
     /// Sürüm bilgisi desenlerini çizer.
+    #[expect(
+        clippy::expect_used,
+        reason = "doğrulanmış normal sürüm 7..=40, 34 girdilik sürüm tablosunu tam indeksler"
+    )]
     fn draw_version_info_patterns(&mut self) {
         match self.version.kind() {
             VersionKind::Micro(_) | VersionKind::Normal(1..=6) => {}
             VersionKind::Normal(a) => {
                 // `a` burada 7..=40 aralığındadır, yani 34 girdilik tabloya indeks 0..=33'tür.
-                let Some(&version_info) = VERSION_INFOS.get((a - 7).as_usize()) else { return };
+                let version_info = *VERSION_INFOS
+                    .get((a - 7).as_usize())
+                    .expect("sürüm iç değişmezi: sürüm bilgisi tabloda bulunmalı");
                 self.draw_number(version_info, 18, Color::Dark, Color::Light, &VERSION_INFO_COORDS_BL);
                 self.draw_number(version_info, 18, Color::Dark, Color::Light, &VERSION_INFO_COORDS_TR);
             }
@@ -1016,7 +1063,7 @@ static VERSION_INFOS: [u32; 34] = [
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ All functional patterns before data placement
+//{{{ Veri yerleşiminden önce tüm işlevsel desenler
 
 impl Canvas {
     /// Veri yerleşiminden önce tüm işlevsel desenleri çizer.
@@ -1034,9 +1081,20 @@ impl Canvas {
 }
 
 /// Verilen koordinattaki modülün işlevsel bir modülü temsil edip etmediğini
-/// verir.
-pub fn is_functional(version: Version, width: i16, x: i16, y: i16) -> bool {
-    debug_assert_eq!(width, version.width());
+/// verir. Koordinat sembolün dışındaysa `false` döndürür; `Canvas` metotlarında
+/// olduğu gibi `-width..0` aralığındaki negatif koordinatlar karşı kenardan
+/// başlayarak normalleştirilir.
+///
+/// # Panics
+///
+/// Yalnızca doğrulanmış bir `Version` ile crate içindeki sabit hizalama tablosu
+/// birbiriyle çelişirse panikler.
+#[expect(clippy::expect_used, reason = "doğrulanmış normal sürüm 7..=40, 34 satırlık hizalama tablosunu tam indeksler")]
+pub fn is_functional(version: Version, x: i16, y: i16) -> bool {
+    let width = version.width();
+    if x < -width || x >= width || y < -width || y >= width {
+        return false;
+    }
 
     let x = if x < 0 { x + width } else { x };
     let y = if y < 0 { y + width } else { y };
@@ -1060,8 +1118,12 @@ pub fn is_functional(version: Version, width: i16, x: i16, y: i16) -> bool {
                 1 => false,
                 2..=6 => (width - 7 - x).abs() <= 2 && (width - 7 - y).abs() <= 2,
                 _ => {
-                    let positions = ALIGNMENT_PATTERN_POSITIONS.get((a - 7).as_usize()).copied().unwrap_or(&[]);
-                    let Some(last) = positions.len().checked_sub(1) else { return false };
+                    let positions = ALIGNMENT_PATTERN_POSITIONS
+                        .get((a - 7).as_usize())
+                        .copied()
+                        .expect("sürüm iç değişmezi: hizalama satırı bulunmalı");
+                    let last =
+                        positions.len().checked_sub(1).expect("sürüm iç değişmezi: hizalama satırı boş olmamalı");
                     for (i, align_x) in positions.iter().enumerate() {
                         for (j, align_y) in positions.iter().enumerate() {
                             if i == 0 && (j == 0 || j == last) || (i == last && j == 0) {
@@ -1143,63 +1205,63 @@ mod all_functional_patterns_tests {
     #[test]
     fn test_is_functional_qr_1() {
         let version = Version::normal(1).unwrap();
-        assert!(is_functional(version, version.width(), 0, 0));
-        assert!(is_functional(version, version.width(), 10, 6));
-        assert!(!is_functional(version, version.width(), 10, 5));
-        assert!(!is_functional(version, version.width(), 14, 14));
-        assert!(is_functional(version, version.width(), 6, 11));
-        assert!(!is_functional(version, version.width(), 4, 11));
-        assert!(is_functional(version, version.width(), 4, 13));
-        assert!(is_functional(version, version.width(), 17, 7));
-        assert!(!is_functional(version, version.width(), 17, 17));
+        assert!(is_functional(version, 0, 0));
+        assert!(is_functional(version, 10, 6));
+        assert!(!is_functional(version, 10, 5));
+        assert!(!is_functional(version, 14, 14));
+        assert!(is_functional(version, 6, 11));
+        assert!(!is_functional(version, 4, 11));
+        assert!(is_functional(version, 4, 13));
+        assert!(is_functional(version, 17, 7));
+        assert!(!is_functional(version, 17, 17));
     }
 
     #[test]
     fn test_is_functional_qr_3() {
         let version = Version::normal(3).unwrap();
-        assert!(is_functional(version, version.width(), 0, 0));
-        assert!(!is_functional(version, version.width(), 25, 24));
-        assert!(is_functional(version, version.width(), 24, 24));
-        assert!(!is_functional(version, version.width(), 9, 25));
-        assert!(!is_functional(version, version.width(), 20, 0));
-        assert!(is_functional(version, version.width(), 21, 0));
+        assert!(is_functional(version, 0, 0));
+        assert!(!is_functional(version, 25, 24));
+        assert!(is_functional(version, 24, 24));
+        assert!(!is_functional(version, 9, 25));
+        assert!(!is_functional(version, 20, 0));
+        assert!(is_functional(version, 21, 0));
     }
 
     #[test]
     fn test_is_functional_qr_7() {
         let version = Version::normal(7).unwrap();
-        assert!(is_functional(version, version.width(), 21, 4));
-        assert!(is_functional(version, version.width(), 7, 21));
-        assert!(is_functional(version, version.width(), 22, 22));
-        assert!(is_functional(version, version.width(), 8, 8));
-        assert!(!is_functional(version, version.width(), 19, 5));
-        assert!(is_functional(version, version.width(), 38, 38));
+        assert!(is_functional(version, 21, 4));
+        assert!(is_functional(version, 7, 21));
+        assert!(is_functional(version, 22, 22));
+        assert!(is_functional(version, 8, 8));
+        assert!(!is_functional(version, 19, 5));
+        assert!(is_functional(version, 38, 38));
 
         // Sürüm 7'den itibaren çizilen 6×3 sürüm bilgisi blokları. Bunlar eskiden
         // sıradan veri modülü olarak yanlış bildiriliyordu.
-        assert!(is_functional(version, version.width(), 36, 3));
-        assert!(is_functional(version, version.width(), 4, 36));
-        assert!(is_functional(version, version.width(), 34, 0));
-        assert!(is_functional(version, version.width(), 0, 34));
-        assert!(!is_functional(version, version.width(), 33, 3)); // bloğun hemen solu
-        assert!(!is_functional(version, version.width(), 3, 33)); // bloğun hemen üstü
+        assert!(is_functional(version, 36, 3));
+        assert!(is_functional(version, 4, 36));
+        assert!(is_functional(version, 34, 0));
+        assert!(is_functional(version, 0, 34));
+        assert!(!is_functional(version, 33, 3)); // bloğun hemen solu
+        assert!(!is_functional(version, 3, 33)); // bloğun hemen üstü
     }
 
     #[test]
     fn test_is_functional_micro() {
         let version = Version::micro(1).unwrap();
-        assert!(is_functional(version, version.width(), 8, 0));
-        assert!(is_functional(version, version.width(), 10, 0));
-        assert!(!is_functional(version, version.width(), 10, 1));
-        assert!(is_functional(version, version.width(), 8, 8));
-        assert!(is_functional(version, version.width(), 0, 9));
-        assert!(!is_functional(version, version.width(), 1, 9));
+        assert!(is_functional(version, 8, 0));
+        assert!(is_functional(version, 10, 0));
+        assert!(!is_functional(version, 10, 1));
+        assert!(is_functional(version, 8, 8));
+        assert!(is_functional(version, 0, 9));
+        assert!(!is_functional(version, 1, 9));
     }
 }
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Data placement iterator
+//{{{ Veri yerleşimi yineleyicisi
 
 struct DataModuleIter {
     x: i16,
@@ -1426,33 +1488,71 @@ mod data_iter_tests {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Data placement
+//{{{ Veri yerleşimi
 
 impl Canvas {
+    /// İşlevsel desenlerin çizilmiş, veri alanının ise henüz boş olduğunu
+    /// doğrular.
+    fn validate_ready_for_data(&self) -> QrResult<()> {
+        for y in 0..self.width {
+            for x in 0..self.width {
+                let module = self.get(x, y);
+                let valid = if is_functional(self.version, x, y) {
+                    matches!(module, Module::Masked(_))
+                } else {
+                    module == Module::Empty
+                };
+                if !valid {
+                    return Err(QrError::InvalidCanvasState);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "uzunluk ve tuval durumu çizimden önce doğrulanır; koordinat tükenmesi iç değişmez ihlalidir"
+    )]
     fn draw_codewords<I>(&mut self, codewords: &[u8], is_half_codeword_at_end: bool, coords: &mut I)
     where
         I: Iterator<Item = (i16, i16)>,
     {
         let length = codewords.len();
-        let last_word = if is_half_codeword_at_end { length - 1 } else { length };
+        let last_word = if is_half_codeword_at_end {
+            length.checked_sub(1).expect("tuval iç değişmezi: yarım kod kelimeli sembolün veri bölümü boş olmamalı")
+        } else {
+            length
+        };
         for (i, b) in codewords.iter().enumerate() {
             let bits_end = if i == last_word { 4 } else { 0 };
-            'outside: for j in (bits_end..=7).rev() {
+            for j in (bits_end..=7).rev() {
                 let color = if (*b & (1 << j)) == 0 { Color::Light } else { Color::Dark };
-                for (x, y) in coords.by_ref() {
-                    let r = self.get_mut(x, y);
-                    if *r == Module::Empty {
-                        *r = Module::Unmasked(color);
-                        continue 'outside;
-                    }
-                }
-                return;
+                let (x, y) = coords
+                    .by_ref()
+                    .find(|&(x, y)| self.get(x, y) == Module::Empty)
+                    .expect("tuval iç değişmezi: doğrulanmış kod kelimeleri veri alanına sığmalı");
+                *self.get_mut(x, y) = Module::Unmasked(color);
             }
         }
     }
 
     /// Kodlanmış veriyi ve hata düzeltme kodlarını boş modüllere çizer.
-    pub fn draw_data(&mut self, data: &[u8], ec: &[u8]) {
+    ///
+    /// # Errors
+    ///
+    /// Dilim uzunlukları sürüm ve hata düzeltme seviyesiyle eşleşmiyorsa
+    /// `Err(QrError::InvalidDataLength)`, işlevsel desenler henüz çizilmemişse
+    /// veya tuvale daha önce veri yerleştirilmişse
+    /// `Err(QrError::InvalidCanvasState)` döndürür. Her iki durumda da tuval
+    /// değişmeden kalır.
+    pub fn draw_data(&mut self, data: &[u8], ec: &[u8]) -> QrResult<()> {
+        let (expected_data, expected_ec) = crate::ec::codeword_lengths(self.version, self.ec_level)?;
+        if data.len() != expected_data || ec.len() != expected_ec {
+            return Err(QrError::InvalidDataLength);
+        }
+        self.validate_ready_for_data()?;
+
         // ISO/IEC 18004:2006 Tablo 7 §6.4.10: M1 ve M3 sembolleri 8'in katı olmayan
         // sayıda veri biti (20 ve 84/68) tutar, yani son veri kod kelimeleri yalnızca
         // 4 bit genişliğindedir. Bu, yalnızca `M` için değil, M3'ün *her iki* hata
@@ -1461,6 +1561,7 @@ impl Canvas {
         let mut coords = DataModuleIter::new(self.version);
         self.draw_codewords(data, is_half_codeword_at_end, &mut coords);
         self.draw_codewords(ec, false, &mut coords);
+        Ok(())
     }
 }
 
@@ -1473,7 +1574,7 @@ mod draw_codewords_test {
     fn test_micro_qr_1() {
         let mut c = Canvas::new(Version::micro(1).unwrap(), EcLevel::L);
         c.draw_all_functional_patterns();
-        c.draw_data(b"\x6e\x5d\xe2", b"\x2b\x63");
+        c.draw_data(b"\x6e\x5d\xe2", b"\x2b\x63").unwrap();
         assert_eq!(
             &*c.to_debug_str(),
             "\n\
@@ -1517,9 +1618,8 @@ mod draw_codewords_test {
 
                 let half_codeword = matches!(version.kind(), VersionKind::Micro(1 | 3));
                 let bits_count = (data.len() + ec.len()) * 8 - usize::from(half_codeword) * 4;
-                let width = version.width();
                 let modules_count =
-                    DataModuleIter::new(version).filter(|&(x, y)| !is_functional(version, width, x, y)).count();
+                    DataModuleIter::new(version).filter(|&(x, y)| !is_functional(version, x, y)).count();
 
                 // Artakalanlar, ISO/IEC 18004:2006 §6.7.2, Tablo 1'deki, tasarım gereği
                 // kullanılmadan bırakılan "kalan bitler"dir.
@@ -1538,11 +1638,10 @@ mod draw_codewords_test {
     fn test_qr_2() {
         let mut c = Canvas::new(Version::normal(2).unwrap(), EcLevel::L);
         c.draw_all_functional_patterns();
-        c.draw_data(
-            b"\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\
-              \x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$",
-            b"",
-        );
+        let codewords = &b"\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\
+                              \x92I$\x92I$\x92I$\x92I$\x92I$\x92I$\x92I$"[..44];
+        let (data, ec) = codewords.split_at(34);
+        c.draw_data(data, ec).unwrap();
         assert_eq!(
             &*c.to_debug_str(),
             "\n\
@@ -1559,10 +1658,10 @@ mod draw_codewords_test {
              -*-*--#----*---*---------\n\
              *----*.*--*-*-*-*-**--**-\n\
              --*-*-#-**---*---*--**--*\n\
-             -*-*--.----*---*---------\n\
-             *----*#*--*-*-*-*-**--**-\n\
-             --*-*-.-**---*---*--**--*\n\
-             -*-*--#----*---*#####----\n\
+             ?*-*--.----*---*---------\n\
+             ??---*#*--*-*-*-*-**--**-\n\
+             ??*-*-.-**---*---*--**--*\n\
+             ??-*--#----*---*#####----\n\
              ........#-*-*-*-#...#-**-\n\
              #######..*---*--#.#.#*--*\n\
              #.....#..--*---*#...#----\n\
@@ -1576,7 +1675,7 @@ mod draw_codewords_test {
 }
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Masking
+//{{{ Maskeleme
 
 /// Maske desenleri. QR kodu ve Micro QR kodu aynı desen numarasını
 /// kullanmadığından, onları numaraya göre değil şekle göre adlandırıyoruz.
@@ -1689,12 +1788,18 @@ impl Canvas {
 
     /// Hata düzeltme seviyesini ve maske desenini kodlayan biçim bilgisini
     /// hesaplar.
+    #[expect(
+        clippy::expect_used,
+        reason = "kapalı EcLevel/MaskPattern değerleri doğrulandıktan sonra 32 girdilik tabloları tam indeksler"
+    )]
     fn format_info(&self, pattern: MaskPattern) -> QrResult<u16> {
         match self.version.kind() {
             VersionKind::Normal(_) => {
                 let index = ((self.ec_level as usize) ^ 1) << 3 | (pattern as usize);
                 // `ec_level` 0..4 ve `pattern` 0..8, yani `index` 0..32 aralığındadır.
-                FORMAT_INFOS_QR.get(index).copied().ok_or(QrError::InvalidVersion)
+                Ok(*FORMAT_INFOS_QR
+                    .get(index)
+                    .expect("tuval iç değişmezi: normal biçim bilgisi indeksi tabloda bulunmalı"))
             }
             VersionKind::Micro(a) => {
                 let micro_pattern_number = match pattern {
@@ -1716,7 +1821,9 @@ impl Canvas {
                     _ => return Err(QrError::InvalidVersion),
                 };
                 let index: usize = symbol_number << 2 | micro_pattern_number;
-                FORMAT_INFOS_MICRO_QR.get(index).copied().ok_or(QrError::InvalidVersion)
+                Ok(*FORMAT_INFOS_MICRO_QR
+                    .get(index)
+                    .expect("tuval iç değişmezi: Micro biçim bilgisi indeksi tabloda bulunmalı"))
             }
         }
     }
@@ -1831,21 +1938,21 @@ static FORMAT_INFOS_MICRO_QR: [u16; 32] = [
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Penalty score
+//{{{ Ceza puanı
 
 impl Canvas {
     /// Aynı renkte fazla sayıda komşu modül bulunmasının ceza puanını hesaplar.
     ///
     /// Aynı sütun/satırda aynı renge sahip her 5+N komşu modül 3+N puan katar.
-    fn compute_adjacent_penalty_score(&self, is_horizontal: bool) -> u16 {
-        let mut total_score = 0;
+    fn compute_adjacent_penalty_score(&self, is_horizontal: bool) -> u32 {
+        let mut total_score = 0_u32;
 
         for i in 0..self.width {
             let map_fn = |j| if is_horizontal { self.get(j, i) } else { self.get(i, j) };
 
             let colors = (0..self.width).map(map_fn).chain(iter::once(Module::Empty));
             let mut last_color = Module::Empty;
-            let mut consecutive_len = 1_u16;
+            let mut consecutive_len = 1_u32;
 
             for color in colors {
                 if color == last_color {
@@ -1866,8 +1973,8 @@ impl Canvas {
     /// Aynı renkte fazla sayıda dikdörtgen bulunmasının ceza puanını hesaplar.
     ///
     /// Aynı renge sahip her 2×2 blok (üst üste binenler sayılarak) 3 puan katar.
-    fn compute_block_penalty_score(&self) -> u16 {
-        let mut total_score = 0;
+    fn compute_block_penalty_score(&self) -> u32 {
+        let mut total_score = 0_u32;
 
         for i in 0..self.width - 1 {
             for j in 0..self.width - 1 {
@@ -1888,15 +1995,15 @@ impl Canvas {
     /// hesaplar.
     ///
     /// Herhangi bir yönelimde `#.###.#....` gibi görünen her desen 40 puan ekler.
-    fn compute_finder_penalty_score(&self, is_horizontal: bool) -> u16 {
+    fn compute_finder_penalty_score(&self, is_horizontal: bool) -> QrResult<u32> {
         static PATTERN: [Color; 7] =
             [Color::Dark, Color::Light, Color::Dark, Color::Dark, Color::Dark, Color::Light, Color::Dark];
 
-        let mut total_score = 0;
+        let mut total_score = 0_u32;
 
         for i in 0..self.width {
             for j in 0..self.width - 6 {
-                // TODO bir closure'a referans yeterli olmalı?
+                // TODO: Bir kapanışa referans yeterli olmalı mı?
                 let get: Box<dyn Fn(i16) -> Color> = if is_horizontal {
                     Box::new(|k| self.get(k, i).into())
                 } else {
@@ -1914,7 +2021,10 @@ impl Canvas {
             }
         }
 
-        total_score - 360
+        // Üç gerçek bulucu deseni iki yönde de bu taramaya girer ve toplam 360
+        // puan üretir. Daha düşük bir değer, veri yerleşim sırasının atlandığını
+        // gösterir; dışarıdan kurulabilen `Canvas` için bu olağan bir API hatasıdır.
+        total_score.checked_sub(360).ok_or(QrError::InvalidCanvasState)
     }
 
     /// Dengesiz koyu/açık oranının ceza puanını hesaplar.
@@ -1925,11 +2035,11 @@ impl Canvas {
     /// Bu algoritmanın standarttan biraz farklı olduğuna dikkat edin: sonucu her
     /// %5'te bir yuvarlamıyoruz, ama fark ihmal edilebilir olmalı ve hangi
     /// maskenin seçileceğini etkilememeli.
-    fn compute_balance_penalty_score(&self) -> u16 {
+    fn compute_balance_penalty_score(&self) -> u32 {
         let dark_modules = self.modules.iter().filter(|m| m.is_dark()).count();
         let total_modules = self.modules.len();
         let ratio = dark_modules * 200 / total_modules;
-        ratio.abs_diff(100).as_u16()
+        u32::from(ratio.abs_diff(100).as_u16())
     }
 
     /// Kenarlarda fazla sayıda açık modül bulunmasının ceza puanını hesaplar.
@@ -1939,27 +2049,27 @@ impl Canvas {
     /// Standardın bu metodun tersi anlama gelen *verimlilik* puanı formülünü
     /// verdiğine dikkat edin, ancak ikisi arasında dönüşüm çok kolaydır (bu puan
     /// (16×width − standart-puan) değeridir).
-    fn compute_light_side_penalty_score(&self) -> u16 {
+    fn compute_light_side_penalty_score(&self) -> u32 {
         let h = (1..self.width).filter(|j| !self.get(*j, -1).is_dark()).count();
         let v = (1..self.width).filter(|j| !self.get(-1, *j).is_dark()).count();
 
-        (h + v + 15 * max(h, v)).as_u16()
+        u32::from((h + v + 15 * max(h, v)).as_u16())
     }
 
     /// Toplam ceza puanlarını hesaplar. Daha yüksek puana sahip bir QR kodu daha
     /// az tercih edilir.
-    fn compute_total_penalty_scores(&self) -> u16 {
+    fn compute_total_penalty_scores(&self) -> QrResult<u32> {
         match self.version.kind() {
             VersionKind::Normal(_) => {
                 let s1_a = self.compute_adjacent_penalty_score(true);
                 let s1_b = self.compute_adjacent_penalty_score(false);
                 let s2 = self.compute_block_penalty_score();
-                let s3_a = self.compute_finder_penalty_score(true);
-                let s3_b = self.compute_finder_penalty_score(false);
+                let s3_a = self.compute_finder_penalty_score(true)?;
+                let s3_b = self.compute_finder_penalty_score(false)?;
                 let s4 = self.compute_balance_penalty_score();
-                s1_a + s1_b + s2 + s3_a + s3_b + s4
+                Ok(s1_a + s1_b + s2 + s3_a + s3_b + s4)
             }
-            VersionKind::Micro(_) => self.compute_light_side_penalty_score(),
+            VersionKind::Micro(_) => Ok(self.compute_light_side_penalty_score()),
         }
     }
 }
@@ -1976,7 +2086,8 @@ mod penalty_tests {
         c.draw_data(
             b"\x20\x5b\x0b\x78\xd1\x72\xdc\x4d\x43\x40\xec\x11\x00",
             b"\xa8\x48\x16\x52\xd9\x36\x9c\x00\x2e\x0f\xb4\x7a\x10",
-        );
+        )
+        .unwrap();
         c.apply_mask(MaskPattern::Checkerboard);
         c
     }
@@ -2027,8 +2138,8 @@ mod penalty_tests {
     #[test]
     fn test_penalty_score_finder() {
         let c = create_test_canvas();
-        assert_eq!(c.compute_finder_penalty_score(true), 0);
-        assert_eq!(c.compute_finder_penalty_score(false), 40);
+        assert_eq!(c.compute_finder_penalty_score(true), Ok(0));
+        assert_eq!(c.compute_finder_penalty_score(false), Ok(40));
     }
 
     #[test]
@@ -2090,7 +2201,7 @@ mod penalty_tests {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Select mask with lowest penalty score
+//{{{ En düşük ceza puanlı maskeyi seçme
 
 static ALL_PATTERNS_QR: [MaskPattern; 8] = [
     MaskPattern::Checkerboard,
@@ -2112,27 +2223,32 @@ impl Canvas {
     ///
     /// # Errors
     ///
-    /// Sürüm ve hata düzeltme seviyesi standardın tanımladığı bir sembolü
-    /// adlandırmıyorsa `Err(QrError::InvalidVersion)` döndürür; her aday desenin
-    /// reddedilmesinin tek yolu budur.
+    /// Veri eksiksiz çizilmemişse ya da tuvalin yapısı bozulmuşsa
+    /// `Err(QrError::InvalidCanvasState)`, sürüm ve hata düzeltme seviyesi
+    /// standardın tanımladığı bir sembolü adlandırmıyorsa
+    /// `Err(QrError::InvalidVersion)` döndürür.
     pub fn apply_best_mask(&self) -> QrResult<Self> {
+        self.validate_ready_for_mask()?;
+
         let patterns: &[MaskPattern] = match self.version.kind() {
             VersionKind::Normal(_) => &ALL_PATTERNS_QR,
             VersionKind::Micro(_) => &ALL_PATTERNS_MICRO_QR,
         };
-        patterns
-            .iter()
-            .filter_map(|ptn| {
-                let mut c = self.clone();
-                c.try_apply_mask(*ptn).ok()?;
-                Some(c)
-            })
-            .min_by_key(Self::compute_total_penalty_scores)
-            .ok_or(QrError::InvalidVersion)
+
+        let mut best: Option<(u32, Self)> = None;
+        for pattern in patterns {
+            let mut candidate = self.clone();
+            candidate.try_apply_mask(*pattern)?;
+            let score = candidate.compute_total_penalty_scores()?;
+            if best.as_ref().is_none_or(|(best_score, _)| score < *best_score) {
+                best = Some((score, candidate));
+            }
+        }
+        best.map(|(_, canvas)| canvas).ok_or(QrError::InvalidVersion)
     }
 
     /// Modülleri bir bool vektörüne dönüştürür.
-    #[deprecated(since = "0.4.0", note = "use `into_colors()` instead")]
+    #[deprecated(since = "0.4.0", note = "bunun yerine `into_colors()` kullanın")]
     pub fn to_bools(&self) -> Vec<bool> {
         self.modules.iter().map(|m| m.is_dark()).collect()
     }

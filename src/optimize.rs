@@ -1,36 +1,73 @@
 //! Bir veri parçasını kodlamak için en uygun veri modu dizisini bulur.
-use crate::types::{Mode, Version};
+use crate::types::{Mode, QrError, QrResult, Version};
 use core::slice::Iter;
 
-#[cfg(feature = "bench")]
-extern crate test;
+/// Standart bir QR kodunun alabileceği en uzun ham girdi.
+///
+/// Bu üst sınır, sürüm 40-L sembolünde sayısal modda kodlanabilen 7089
+/// rakamdan gelir. Başka hiçbir mod daha uzun bir ham bayt dizisi taşıyamaz.
+pub const MAX_INPUT_BYTES: usize = 7089;
 
 //------------------------------------------------------------------------------
-//{{{ Segment
+//{{{ Veri parçası
 
 /// Bir kodlama moduna bağlanmış veri parçası.
 #[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub struct Segment {
     /// Veri parçasının kodlama modu.
-    pub mode: Mode,
+    pub(crate) mode: Mode,
 
     /// Parçanın başlangıç indeksi.
-    pub begin: usize,
+    pub(crate) begin: usize,
 
     /// Parçanın bitiş indeksi (hariç).
-    pub end: usize,
+    pub(crate) end: usize,
 }
 
 impl Segment {
+    /// Doğrulanmış bir veri parçası kurar.
+    ///
+    /// # Errors
+    ///
+    /// `begin`, `end` değerinden büyükse veya `end` QR standardının izin
+    /// verdiği en uzun girdiyi aşıyorsa `Err(QrError::InvalidSegment)` döndürür.
+    pub const fn new(mode: Mode, begin: usize, end: usize) -> QrResult<Self> {
+        if begin > end || end > MAX_INPUT_BYTES { Err(QrError::InvalidSegment) } else { Ok(Self { mode, begin, end }) }
+    }
+
+    /// Veri parçasının kodlama modu.
+    pub const fn mode(self) -> Mode {
+        self.mode
+    }
+
+    /// Parçanın başlangıç indeksi.
+    pub const fn begin(self) -> usize {
+        self.begin
+    }
+
+    /// Parçanın bitiş indeksi (hariç).
+    pub const fn end(self) -> usize {
+        self.end
+    }
+
     /// Bu parça kodlandığında oluşacak bit sayısını (mod göstergesi ve uzunluk
     /// bitlerinin boyutu dahil) hesaplar.
+    ///
+    /// # Panics
+    ///
+    /// Yalnızca özel alanları kuran [`Segment::new`] ile bit uzunluğu
+    /// hesaplamasının sınırları birbiriyle çelişirse panikler.
+    #[expect(clippy::expect_used, reason = "Segment kurucusu uzunluğu QR standardının küçük üst sınırına hapseder")]
     pub fn encoded_len(&self, version: Version) -> usize {
         let byte_size = self.end - self.begin;
         let chars_count = if self.mode == Mode::Kanji { byte_size / 2 } else { byte_size };
 
         let mode_bits_count = version.mode_bits_count();
         let length_bits_count = self.mode.length_bits_count(version);
-        let data_bits_count = self.mode.data_bits_count(chars_count);
+        let data_bits_count = self
+            .mode
+            .data_bits_count(chars_count)
+            .expect("Segment iç değişmezi: doğrulanmış uzunluğun bit sayısı taşmamalı");
 
         mode_bits_count + length_bits_count + data_bits_count
     }
@@ -38,7 +75,7 @@ impl Segment {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Parser
+//{{{ Ayrıştırıcı
 
 /// Bu yineleyici temelde şuna eşdeğerdir:
 ///
@@ -93,29 +130,41 @@ impl Parser<'_> {
     /// use qrcode::optimize::{Parser, Segment};
     /// use qrcode::types::Mode::{Alphanumeric, Byte, Numeric};
     ///
-    /// let parse_res = Parser::new(b"ABC123abcd").collect::<Vec<Segment>>();
+    /// let parse_res = Parser::new(b"ABC123abcd").unwrap().collect::<Vec<Segment>>();
     /// assert_eq!(
     ///     parse_res,
     ///     &[
-    ///         Segment { mode: Alphanumeric, begin: 0, end: 3 },
-    ///         Segment { mode: Numeric, begin: 3, end: 6 },
-    ///         Segment { mode: Byte, begin: 6, end: 10 }
+    ///         Segment::new(Alphanumeric, 0, 3).unwrap(),
+    ///         Segment::new(Numeric, 3, 6).unwrap(),
+    ///         Segment::new(Byte, 6, 10).unwrap(),
     ///     ]
     /// );
     /// ```
-    pub fn new(data: &[u8]) -> Parser<'_> {
-        Parser {
+    ///
+    /// # Errors
+    ///
+    /// Veri herhangi bir standart QR koduna sığamayacak kadar uzunsa
+    /// `Err(QrError::DataTooLong)` döndürür.
+    pub fn new(data: &[u8]) -> QrResult<Parser<'_>> {
+        if data.len() > MAX_INPUT_BYTES {
+            return Err(QrError::DataTooLong);
+        }
+        Ok(Parser {
             ecs_iter: EcsIter { base: data.iter(), index: 0, ended: false },
             state: State::Init,
             begin: 0,
             pending_single_byte: false,
-        }
+        })
     }
 }
 
 impl Iterator for Parser<'_> {
     type Item = Segment;
 
+    #[expect(
+        clippy::expect_used,
+        reason = "kapalı State ve ExclCharSet enumları toplam 70 girdilik tabloyu tam indeksler"
+    )]
     fn next(&mut self) -> Option<Segment> {
         if self.pending_single_byte {
             self.pending_single_byte = false;
@@ -127,7 +176,9 @@ impl Iterator for Parser<'_> {
             let (i, ecs) = self.ecs_iter.next()?;
             // `State` 60'a kadar 10'un katıdır ve `ExclCharSet` 0..=9 aralığındadır,
             // yani toplam 70 girdilik tabloyu tam olarak indeksler.
-            let (next_state, action) = *STATE_TRANSITION.get(self.state as usize + ecs as usize)?;
+            let (next_state, action) = *STATE_TRANSITION
+                .get(self.state as usize + ecs as usize)
+                .expect("ayrıştırıcı iç değişmezi: durum geçişi tabloda bulunmalı");
             self.state = next_state;
 
             let old_begin = self.begin;
@@ -162,7 +213,7 @@ mod parse_tests {
     use alloc::vec::Vec;
 
     fn parse(data: &[u8]) -> Vec<Segment> {
-        Parser::new(data).collect()
+        Parser::new(data).unwrap().collect()
     }
 
     #[test]
@@ -196,7 +247,7 @@ mod parse_tests {
 
     #[test]
     fn test_parse_utf_8() {
-        // Mojibake?
+        // Kodlama bozulması mı?
         let segs = parse(b"\xe3\x81\x82\xe3\x80\x81A\xef\xbd\xb1\xe2\x84\xab");
         assert_eq!(
             segs,
@@ -252,7 +303,7 @@ mod parse_tests {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Optimizer
+//{{{ İyileştirici
 
 /// QR kodu veri optimize edici.
 pub struct Optimizer<I> {
@@ -313,6 +364,16 @@ impl<I: Iterator<Item = Segment>> Iterator for Optimizer<I> {
                 Some(segment) => {
                     let seg_size = segment.encoded_len(self.version);
 
+                    // Kamu kurucusu tek tek parçaları doğrular; farklı veri
+                    // aralıklarına ait, komşu olmayan parçaları birleştirmek ise
+                    // anlamlı değildir. Böyle bir girdiyi olduğu gibi geçiririz.
+                    if self.last_segment.end != segment.begin {
+                        let old_segment = self.last_segment;
+                        self.last_segment = segment;
+                        self.last_segment_size = seg_size;
+                        return Some(old_segment);
+                    }
+
                     let new_segment = Segment {
                         mode: self.last_segment.mode.max(segment.mode),
                         begin: self.last_segment.begin,
@@ -336,8 +397,14 @@ impl<I: Iterator<Item = Segment>> Iterator for Optimizer<I> {
 }
 
 /// Tüm parçaların toplam kodlanmış uzunluğunu hesaplar.
-pub fn total_encoded_len(segments: &[Segment], version: Version) -> usize {
-    segments.iter().map(|seg| seg.encoded_len(version)).sum()
+///
+/// # Errors
+///
+/// Toplam bir `usize` içine sığmıyorsa `Err(QrError::DataTooLong)` döndürür.
+pub fn total_encoded_len(segments: &[Segment], version: Version) -> QrResult<usize> {
+    segments
+        .iter()
+        .try_fold(0_usize, |total, seg| total.checked_add(seg.encoded_len(version)).ok_or(QrError::DataTooLong))
 }
 
 #[cfg(test)]
@@ -347,16 +414,16 @@ mod optimize_tests {
     use alloc::vec::Vec;
 
     fn test_optimization_result(given: &[Segment], expected: &[Segment], version: Version) {
-        let prev_len = total_encoded_len(given, version);
+        let prev_len = total_encoded_len(given, version).unwrap();
         let opt_segs = Optimizer::new(given.iter().copied(), version).collect::<Vec<_>>();
-        let new_len = total_encoded_len(&opt_segs, version);
+        let new_len = total_encoded_len(&opt_segs, version).unwrap();
         if given != opt_segs {
             assert!(prev_len > new_len, "{prev_len} > {new_len}");
         }
         assert!(
             opt_segs == expected,
-            "Optimization gave something better: {new_len} < {} ({opt_segs:?})",
-            total_encoded_len(expected, version)
+            "optimizasyon beklenenden daha iyi sonuç verdi: {new_len} < {} ({opt_segs:?})",
+            total_encoded_len(expected, version).unwrap()
         );
     }
 
@@ -454,35 +521,9 @@ mod optimize_tests {
     }
 }
 
-#[cfg(feature = "bench")]
-#[bench]
-fn bench_optimize(bencher: &mut test::Bencher) {
-    use crate::types::Version;
-
-    let data = b"QR\x83R\x81[\x83h\x81i\x83L\x83\x85\x81[\x83A\x81[\x83\x8b\x83R\x81[\x83h\x81j\
-                 \x82\xc6\x82\xcd\x81A1994\x94N\x82\xc9\x83f\x83\x93\x83\\\x81[\x82\xcc\x8aJ\
-                 \x94\xad\x95\x94\x96\xe5\x81i\x8c\xbb\x8d\xdd\x82\xcd\x95\xaa\x97\xa3\x82\xb5\x83f\
-                 \x83\x93\x83\\\x81[\x83E\x83F\x81[\x83u\x81j\x82\xaa\x8aJ\x94\xad\x82\xb5\x82\xbd\
-                 \x83}\x83g\x83\x8a\x83b\x83N\x83X\x8c^\x93\xf1\x8e\x9f\x8c\xb3\x83R\x81[\x83h\
-                 \x82\xc5\x82\xa0\x82\xe9\x81B\x82\xc8\x82\xa8\x81AQR\x83R\x81[\x83h\x82\xc6\
-                 \x82\xa2\x82\xa4\x96\xbc\x8f\xcc\x81i\x82\xa8\x82\xe6\x82\xd1\x92P\x8c\xea\x81j\
-                 \x82\xcd\x83f\x83\x93\x83\\\x81[\x83E\x83F\x81[\x83u\x82\xcc\x93o\x98^\x8f\xa4\
-                 \x95W\x81i\x91\xe64075066\x8d\x86\x81j\x82\xc5\x82\xa0\x82\xe9\x81BQR\x82\xcd\
-                 Quick Response\x82\xc9\x97R\x97\x88\x82\xb5\x81A\x8d\x82\x91\xac\x93\xc7\x82\xdd\
-                 \x8e\xe6\x82\xe8\x82\xaa\x82\xc5\x82\xab\x82\xe9\x82\xe6\x82\xa4\x82\xc9\x8aJ\
-                 \x94\xad\x82\xb3\x82\xea\x82\xbd\x81B\x93\x96\x8f\x89\x82\xcd\x8e\xa9\x93\xae\
-                 \x8e\xd4\x95\x94\x95i\x8dH\x8f\xea\x82\xe2\x94z\x91\x97\x83Z\x83\x93\x83^\x81[\
-                 \x82\xc8\x82\xc7\x82\xc5\x82\xcc\x8eg\x97p\x82\xf0\x94O\x93\xaa\x82\xc9\x8aJ\
-                 \x94\xad\x82\xb3\x82\xea\x82\xbd\x82\xaa\x81A\x8c\xbb\x8d\xdd\x82\xc5\x82\xcd\x83X\
-                 \x83}\x81[\x83g\x83t\x83H\x83\x93\x82\xcc\x95\x81\x8by\x82\xc8\x82\xc7\x82\xc9\
-                 \x82\xe6\x82\xe8\x93\xfa\x96{\x82\xc9\x8c\xc0\x82\xe7\x82\xb8\x90\xa2\x8aE\x93I\
-                 \x82\xc9\x95\x81\x8by\x82\xb5\x82\xc4\x82\xa2\x82\xe9\x81B";
-    bencher.iter(|| Parser::new(data).optimize(Version::normal(15).unwrap()));
-}
-
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Internal types and data for parsing
+//{{{ Ayrıştırma için iç tipler ve veriler
 
 /// Hangi kodlamanın kullanılacağı belirlenirken tüm `u8` değerleri 9 farklı
 /// karakter kümesine ayrılabilir. Bu enum, ayrıştırma amacıyla bu grupları
@@ -597,7 +638,7 @@ enum Action {
 }
 
 static STATE_TRANSITION: [(State, Action); 70] = [
-    // STATE_TRANSITION[current_state + next_character] == (next_state, what_to_do)
+    // STATE_TRANSITION[geçerli_durum + sonraki_karakter] == (sonraki_durum, yapılacak_iş)
 
     // Init durumu:
     (State::Init, Action::Idle),      // End

@@ -29,6 +29,15 @@ pub enum QrError {
     /// Karakter kümesine ait olmayan bir karakter bulundu.
     InvalidCharacter,
 
+    /// Bir veri parçasının sınırları geçersiz.
+    InvalidSegment,
+
+    /// Verilen veri uzunluğu API'nin beklediği uzunlukla eşleşmiyor.
+    InvalidDataLength,
+
+    /// Tuval işlemleri gereken sırada uygulanmadığı için tuval geçersiz durumda.
+    InvalidCanvasState,
+
     /// Maske deseni bu QR kodu sürümü tarafından desteklenmiyor. Micro QR
     /// kodları 8 desenden yalnızca 4'üne izin verir.
     InvalidMaskPattern,
@@ -48,6 +57,9 @@ impl Display for QrError {
             Self::UnsupportedCharacterSet => "desteklenmeyen karakter kümesi",
             Self::InvalidEciDesignator => "geçersiz ECI tanımlayıcısı",
             Self::InvalidCharacter => "geçersiz karakter",
+            Self::InvalidSegment => "geçersiz veri parçası",
+            Self::InvalidDataLength => "geçersiz veri uzunluğu",
+            Self::InvalidCanvasState => "geçersiz tuval durumu",
             Self::InvalidMaskPattern => "bu sürüm için geçersiz maske deseni",
             Self::CoordinateOutOfRange => "koordinat aralık dışı",
             Self::ImageTooLarge => "görüntü çok büyük",
@@ -65,7 +77,7 @@ pub type QrResult<T> = Result<T, QrError>;
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Color
+//{{{ Renk
 
 /// Bir modülün rengi.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -80,12 +92,12 @@ impl Color {
     /// Modülün rengine göre bir değer seçer.
     /// `if self != Color::Light { dark } else { light }` ile eşdeğerdir.
     ///
-    /// # Examples
+    /// # Örnekler
     ///
     /// ```
     /// # use qrcode::types::Color;
     /// assert_eq!(Color::Light.select(1, 0), 0);
-    /// assert_eq!(Color::Dark.select("black", "white"), "black");
+    /// assert_eq!(Color::Dark.select("siyah", "beyaz"), "siyah");
     /// ```
     pub fn select<T>(self, dark: T, light: T) -> T {
         match self {
@@ -107,7 +119,7 @@ impl Not for Color {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Error correction level
+//{{{ Hata düzeltme seviyesi
 
 /// Hata düzeltme seviyesi. Kodun bir kısmı hasar görse bile özgün bilginin
 /// geri kazanılmasını sağlar.
@@ -128,7 +140,7 @@ pub enum EcLevel {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Version
+//{{{ Sürüm
 
 /// Sürüm başına sabit kodlanmış tablolardaki girdi sayısı: 40 QR kodu sürümü
 /// ve ardından 4 Micro QR kodu sürümü.
@@ -251,6 +263,16 @@ impl Version {
     /// Girdi `T`'nin varsayılan değerine eşitse bu metot
     /// `Err(QrError::InvalidVersion)` döndürür. Micro QR kodu sürümleri
     /// desteklemedikleri hata düzeltme seviyelerini böyle reddeder.
+    ///
+    /// # Panics
+    ///
+    /// Yalnızca doğrulanmış `Version`/`EcLevel` değerleri imzada uzunluğu
+    /// sabitlenmiş tabloyu indeksleyemezse, yani bir crate iç değişmezi
+    /// bozulursa panikler.
+    #[expect(
+        clippy::expect_used,
+        reason = "Version kurucuları ve kapalı EcLevel enumu sabit tablo boyutlarını tam indeksler"
+    )]
     pub fn fetch<T>(self, ec_level: EcLevel, table: &[[T; 4]; VERSION_COUNT]) -> QrResult<T>
     where
         T: PartialEq + Default + Copy,
@@ -261,7 +283,7 @@ impl Version {
             .get(self.table_index())
             .and_then(|row| row.get(ec_level as usize))
             .copied()
-            .ok_or(QrError::InvalidVersion)?;
+            .expect("Version iç değişmezi: sürüm ve hata düzeltme seviyesi tablo içinde kalmalı");
         if obj == T::default() { Err(QrError::InvalidVersion) } else { Ok(obj) }
     }
 
@@ -283,7 +305,7 @@ impl Version {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Mode indicator
+//{{{ Mod göstergesi
 
 /// Kodlanan verinin karakter kümesini belirten mod göstergesi.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -311,8 +333,6 @@ impl Mode {
     /// assert_eq!(Mode::Numeric.length_bits_count(Version::normal(1).unwrap()), 10);
     /// ```
     ///
-    /// Mod verilen sürümde desteklenmiyorsa bu metot
-    /// `Err(QrError::UnsupportedCharacterSet)` döndürür.
     pub fn length_bits_count(self, version: Version) -> usize {
         match version.kind() {
             VersionKind::Micro(a) => {
@@ -348,17 +368,25 @@ impl Mode {
     /// ```
     /// use qrcode::types::Mode;
     ///
-    /// assert_eq!(Mode::Numeric.data_bits_count(7), 24);
+    /// assert_eq!(Mode::Numeric.data_bits_count(7), Ok(24));
     /// ```
     ///
     /// Kanji modunda `raw_data_len`'in Kanji sayısı olduğuna, yani toplam bayt
     /// boyutunun yarısı olduğuna dikkat edin.
-    pub const fn data_bits_count(self, raw_data_len: usize) -> usize {
-        match self {
-            Self::Numeric => (raw_data_len * 10).div_ceil(3),
-            Self::Alphanumeric => (raw_data_len * 11).div_ceil(2),
-            Self::Byte => raw_data_len * 8,
-            Self::Kanji => raw_data_len * 13,
+    ///
+    /// # Errors
+    ///
+    /// Sonuç bir `usize` içine sığmıyorsa `Err(QrError::DataTooLong)` döndürür.
+    pub const fn data_bits_count(self, raw_data_len: usize) -> QrResult<usize> {
+        let (multiplier, divisor) = match self {
+            Self::Numeric => (10, 3),
+            Self::Alphanumeric => (11, 2),
+            Self::Byte => (8, 1),
+            Self::Kanji => (13, 1),
+        };
+        match raw_data_len.checked_mul(multiplier) {
+            Some(bits) => Ok(bits.div_ceil(divisor)),
+            None => Err(QrError::DataTooLong),
         }
     }
 

@@ -1,6 +1,6 @@
 //! PIC çizim desteği.
 //!
-//! # Example
+//! # Örnek
 //!
 //! ```
 //! use qrcode::QrCode;

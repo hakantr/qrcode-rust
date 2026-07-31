@@ -1,9 +1,12 @@
-//! Hiçbir genel giriş noktasının süreci abort etmediğini doğrulayan kapsamlı
+//! Hiçbir genel giriş noktasının süreci sonlandırmadığını doğrulayan kapsamlı
 //! tarama.
 //!
-//! Crate'in sözleşmesi şudur: *geçerli* bir girdi asla paniklemez, geçersiz
-//! olan ise [`QrError`] olarak geri döner. Bu sessizce bozulması kolay bir
-//! şeydir; bu yüzden bu test tüm bileşim uzayını -- her sürüm, her hata
+//! Crate'in sözleşmesi şudur: geçersiz dış girdi, olağan çalışma hatası ve
+//! desteklenmeyen seçenek genel `try_*` giriş noktalarını panikletmez; bir
+//! [`QrError`] olarak geri döner. Bellek tükenmesi, bağımlılık panikleri ve
+//! belgelenmiş programlama sözleşmesi ihlalleri bu garantinin dışındadır. Bu
+//! sınır sessizce bozulması kolay bir şeydir; bu yüzden bu test tüm bileşim
+//! uzayını -- her sürüm, her hata
 //! düzeltme seviyesi, her maske deseni, her kenarın üzerindeki ve ötesindeki
 //! koordinatlar -- dolaşır ve yanlış bir cevapta değil, ilk panikte başarısız
 //! olur.
@@ -27,8 +30,9 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use qrcode::canvas::{Canvas, MaskPattern};
+use qrcode::optimize::{MAX_INPUT_BYTES, Optimizer, Parser, Segment};
 use qrcode::render::Renderer;
-use qrcode::types::Color;
+use qrcode::types::{Color, Mode, QrError};
 use qrcode::{EcLevel, QrCode, Version};
 
 const EC_LEVELS: [EcLevel; 4] = [EcLevel::L, EcLevel::M, EcLevel::Q, EcLevel::H];
@@ -70,14 +74,58 @@ fn no_panic<T>(what: &str, f: impl FnOnce() -> T) -> T {
 fn version_constructors_reject_out_of_range_numbers() {
     for number in [i16::MIN, -1, 0, 41, 100, i16::MAX] {
         no_panic(&format!("Version::normal({number})"), || {
-            assert!(Version::normal(number).is_err(), "Version::normal({number}) should be rejected");
+            assert!(Version::normal(number).is_err(), "Version::normal({number}) reddedilmeliydi");
         });
     }
     for number in [i16::MIN, -1, 0, 5, 100, i16::MAX] {
         no_panic(&format!("Version::micro({number})"), || {
-            assert!(Version::micro(number).is_err(), "Version::micro({number}) should be rejected");
+            assert!(Version::micro(number).is_err(), "Version::micro({number}) reddedilmeliydi");
         });
     }
+}
+
+#[test]
+fn validated_data_boundaries_reject_bad_values_without_panicking() {
+    no_panic("ters Segment aralığı", || {
+        assert_eq!(Segment::new(Mode::Byte, 2, 1), Err(QrError::InvalidSegment));
+    });
+    no_panic("aşırı uzun Segment aralığı", || {
+        assert_eq!(Segment::new(Mode::Byte, 0, MAX_INPUT_BYTES + 1), Err(QrError::InvalidSegment));
+    });
+    no_panic("aşırı uzun Parser girdisi", || {
+        let data = vec![b'0'; MAX_INPUT_BYTES + 1];
+        assert!(matches!(Parser::new(&data), Err(QrError::DataTooLong)));
+    });
+    no_panic("taşan mod bit uzunluğu", || {
+        assert_eq!(Mode::Byte.data_bits_count(usize::MAX), Err(QrError::DataTooLong));
+    });
+    no_panic("komşu olmayan iyileştirici parçaları", || {
+        let segments = [Segment::new(Mode::Byte, 10, 11).unwrap(), Segment::new(Mode::Byte, 0, 1).unwrap()];
+        assert_eq!(Optimizer::new(segments.into_iter(), Version::normal(1).unwrap()).collect::<Vec<_>>(), segments);
+    });
+}
+
+#[test]
+fn failed_bit_writes_leave_the_original_value_unchanged() {
+    use qrcode::bits::Bits;
+
+    let version = Version::normal(1).unwrap();
+    let mut bits = Bits::new(version);
+    bits.push_byte_data("başlangıç".as_bytes()).unwrap();
+    let original_len = bits.len();
+
+    assert_eq!(bits.push_numeric_data(b"12x"), Err(QrError::InvalidCharacter));
+    assert_eq!(bits.len(), original_len);
+    assert_eq!(bits.push_alphanumeric_data(b"abc"), Err(QrError::InvalidCharacter));
+    assert_eq!(bits.len(), original_len);
+    assert_eq!(bits.push_kanji_data(b"AA"), Err(QrError::InvalidCharacter));
+    assert_eq!(bits.len(), original_len);
+    assert_eq!(bits.push_eci_designator(1_000_000), Err(QrError::InvalidEciDesignator));
+    assert_eq!(bits.len(), original_len);
+
+    let segments = [Segment::new(Mode::Byte, 0, 2).unwrap()];
+    assert_eq!(bits.push_segments(b"x", segments.into_iter()), Err(QrError::InvalidSegment));
+    assert_eq!(bits.len(), original_len);
 }
 
 #[test]
@@ -154,7 +202,7 @@ fn every_mask_pattern_on_every_symbol_is_accepted_or_rejected_cleanly() {
                     let mut canvas = Canvas::new(version, ec_level);
                     canvas.draw_all_functional_patterns();
                     // Micro semboller 8 desenden yalnızca 4'ünü destekler ve bazı
-                    // sürüm/ec_level çiftleri hiç var olmaz. Her ikisi de abort değil, hata
+                    // sürüm/ec_level çiftleri hiç var olmaz. Her ikisi de sürecin sonlanması değil, hata
                     // olarak geri dönmelidir.
                     let _ = canvas.try_apply_mask(pattern);
                 });
@@ -167,6 +215,24 @@ fn every_mask_pattern_on_every_symbol_is_accepted_or_rejected_cleanly() {
             });
         }
     }
+}
+
+#[test]
+fn canvas_reports_invalid_call_order_and_lengths() {
+    let version = Version::normal(1).unwrap();
+    let mut canvas = Canvas::new(version, EcLevel::L);
+
+    no_panic("işlevsel desensiz draw_data", || {
+        assert_eq!(canvas.draw_data(&[0; 19], &[0; 7]), Err(QrError::InvalidCanvasState));
+    });
+    no_panic("verisiz apply_best_mask", || {
+        assert!(matches!(canvas.apply_best_mask(), Err(QrError::InvalidCanvasState)));
+    });
+
+    canvas.draw_all_functional_patterns();
+    no_panic("yanlış kod kelimesi uzunluğu", || {
+        assert_eq!(canvas.draw_data(&[], &[]), Err(QrError::InvalidDataLength));
+    });
 }
 
 #[test]
@@ -191,7 +257,7 @@ fn coordinates_outside_the_symbol_are_reported_not_fatal() {
             let inside = coord < width;
             assert_eq!(code.get(coord, 0).is_some(), inside, "x={coord}");
             assert_eq!(code.get(0, coord).is_some(), inside, "y={coord}");
-            assert_eq!(code.get_functional(coord, 0).is_some(), inside, "functional x={coord}");
+            assert_eq!(code.get_functional(coord, 0).is_some(), inside, "işlevsel x={coord}");
         });
     }
 }
@@ -222,12 +288,38 @@ fn renderer_reports_bad_input_instead_of_aborting() {
         let _ = renderer.min_dimensions(200, 200).try_build();
         let _ = renderer.max_dimensions(200, 200).try_build();
     });
+    no_panic("Dense1x2 ile sıfır modül", || {
+        let image = Renderer::<qrcode::render::unicode::Dense1x2>::try_new(&[], 0, 0).unwrap().try_build().unwrap();
+        assert!(image.is_empty());
+    });
+
+    // Tam 2^32 piksel, u32 çarpımını taşırdığı için arka uca ulaşmamalıdır.
+    no_panic("Renderer with exactly 2^32 pixels", || {
+        let mut renderer = Renderer::<char>::try_new(&[Color::Dark], 1, 0).unwrap();
+        assert_eq!(
+            renderer.quiet_zone(false).module_dimensions(65_536, 65_536).try_build(),
+            Err(QrError::ImageTooLarge)
+        );
+    });
 
     // `u32`'yi taşıran boyutlar sarmalanmalı değil, bildirilmelidir.
     no_panic("Renderer with overflowing module size", || {
         let code = QrCode::new(b"hi").unwrap();
         assert!(code.render::<char>().module_dimensions(u32::MAX, u32::MAX).try_build().is_err());
     });
+}
+
+#[cfg(feature = "svg")]
+#[test]
+fn svg_colors_are_xml_attribute_escaped() {
+    use qrcode::render::svg;
+
+    let payload = r#""/><script>alert(1)</script><path fill=""#;
+    let mut renderer = Renderer::<svg::Color>::try_new(&[Color::Dark], 1, 0).unwrap();
+    let svg = renderer.quiet_zone(false).dark_color(svg::Color(payload)).try_build().unwrap();
+
+    assert!(!svg.contains("<script>"));
+    assert!(svg.contains("&quot;/&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;path fill=&quot;"));
 }
 
 #[test]
@@ -237,7 +329,7 @@ fn error_correction_rejects_oversized_blocks() {
     for size in [0, 1, MAX_EC_CODE_SIZE, MAX_EC_CODE_SIZE + 1, 1000, usize::from(u8::MAX)] {
         no_panic(&format!("create_error_correction_code(_, {size})"), || {
             let result = create_error_correction_code(b"data", size);
-            assert_eq!(result.is_ok(), size <= MAX_EC_CODE_SIZE, "size={size}");
+            assert_eq!(result.is_ok(), size <= MAX_EC_CODE_SIZE, "boyut={size}");
         });
     }
 }
@@ -299,7 +391,7 @@ fn randomised_inputs_never_panic() {
                 let _ = code.render::<qrcode::render::unicode::Dense1x2>().try_build();
             }
         }));
-        assert!(result.is_ok(), "panicked: {what}");
+        assert!(result.is_ok(), "panikledi: {what}");
     }
 
     // Boyutlandırma istekleri diğer yarısıdır: aritmetik eskiden sarmalanıyordu.
@@ -313,7 +405,7 @@ fn randomised_inputs_never_panic() {
             let _ = code.render::<char>().min_dimensions(mw, mh).try_build();
             let _ = code.render::<char>().max_dimensions(mw, mh).try_build();
         }));
-        assert!(result.is_ok(), "panicked: {what}");
+        assert!(result.is_ok(), "panikledi: {what}");
     }
 
     let _ = versions;

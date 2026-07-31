@@ -1,6 +1,6 @@
 //! SVG çizim desteği.
 //!
-//! # Example
+//! # Örnek
 //!
 //! ```
 //! use qrcode::QrCode;
@@ -44,6 +44,8 @@ impl<'a> RenderCanvas for Canvas<'a> {
     type Image = String;
 
     fn new(width: u32, height: u32, dark_pixel: Color<'a>, light_pixel: Color<'a>) -> Self {
+        let foreground = escape_attribute(dark_pixel.0);
+        let background = escape_attribute(light_pixel.0);
         Canvas {
             svg: format!(
                 concat!(
@@ -56,8 +58,8 @@ impl<'a> RenderCanvas for Canvas<'a> {
                 ),
                 w = width,
                 h = height,
-                fg = dark_pixel.0,
-                bg = light_pixel.0
+                fg = foreground,
+                bg = background
             ),
             marker: PhantomData,
         }
@@ -77,4 +79,21 @@ impl<'a> RenderCanvas for Canvas<'a> {
         self.svg.push_str(r#""/></svg>"#);
         self.svg
     }
+}
+
+/// Kullanıcı tarafından verilen bir rengi güvenli bir XML öznitelik değerine
+/// dönüştürür.
+fn escape_attribute(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }

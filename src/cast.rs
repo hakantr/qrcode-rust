@@ -11,8 +11,8 @@
 //! Asıl önemli olan, **release** derlemelerinde de kontrol yapmalarıdır.
 //! Önceki implementasyon kontrollü dönüşümle çıplak `as` arasında seçim
 //! yapmak için `#[cfg(debug_assertions)]` kullanıyordu; yani release derlemesi
-//! sessizce sarmalanıp bozuk bir QR kodu üretirken debug derlemesi abort
-//! ediyordu. Sessizce yanlış cevabı gürültülü olanla takas etmek bu modülün
+//! sessizce sarmalanıp bozuk bir QR kodu üretirken hata ayıklama derlemesi
+//! süreci sonlandırıyordu. Sessizce yanlış cevabı gürültülü olanla takas etmek bu modülün
 //! varlık sebebidir.
 
 /// Tip sisteminin eleyemediği ama crate'in değişmezlerinin elediği bir

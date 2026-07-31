@@ -6,7 +6,7 @@ use core::ops::Deref;
 use crate::types::{EcLevel, QrError, QrResult, Version};
 
 //------------------------------------------------------------------------------
-//{{{ Error correction primitive
+//{{{ Hata düzeltme temel işlemi
 
 /// Bu modülün hesaplayabileceği en büyük hata düzeltme kodu boyutu; yani bu
 /// crate'in tablosuna sahip olduğu en yüksek dereceli üreteç polinomu.
@@ -25,6 +25,15 @@ pub const MAX_EC_CODE_SIZE: usize = 69;
 /// `Err(QrError::InvalidVersion)` döndürür. Hiçbir QR kodu sürümü daha uzun
 /// bir blok gerektirmez, yani bu kodlayıcı üzerinden erişilemez; eskiden bir
 /// indeks paniğiydi.
+///
+/// # Panics
+///
+/// Yalnızca doğrulanmış kod boyutuyla crate içindeki Reed-Solomon tabloları
+/// birbiriyle çelişirse panikler.
+#[expect(
+    clippy::expect_used,
+    reason = "girdi sınırı ve kapalı u8 üsleri tüm Reed-Solomon tablo aramalarını garanti eder"
+)]
 pub fn create_error_correction_code(data: &[u8], ec_code_size: usize) -> QrResult<Vec<u8>> {
     let data_len = data.len();
     let log_den = *GENERATOR_POLYNOMIALS.get(ec_code_size).ok_or(QrError::InvalidVersion)?;
@@ -33,7 +42,7 @@ pub fn create_error_correction_code(data: &[u8], ec_code_size: usize) -> QrResul
     res.resize(ec_code_size + data_len, 0);
 
     for i in 0..data_len {
-        let Some(&lead_coeff) = res.get(i) else { break };
+        let lead_coeff = *res.get(i).expect("Reed-Solomon iç değişmezi: veri katsayısı sonuç tamponunda bulunmalı");
         if lead_coeff == 0 {
             continue;
         }
@@ -41,11 +50,15 @@ pub fn create_error_correction_code(data: &[u8], ec_code_size: usize) -> QrResul
         // LOG_TABLE ve EXP_TABLE'ın ikisi de 256 bayttır ve bir `u8` ile ya da
         // modulo 255 indirgenmiş bir değerle indekslenir, yani hiçbir arama aralık
         // dışı olamaz; `get` bunu yorum olmaktan çıkarıp kanıtlanabilir kılar.
-        let log_lead_coeff = LOG_TABLE.get(usize::from(lead_coeff)).copied().map_or(0, usize::from);
-        let tail = res.get_mut(i + 1..).unwrap_or_default();
+        let log_lead_coeff = usize::from(
+            *LOG_TABLE
+                .get(usize::from(lead_coeff))
+                .expect("Reed-Solomon iç değişmezi: u8 katsayısı log tablosunda bulunmalı"),
+        );
+        let tail = res.get_mut(i + 1..).expect("Reed-Solomon iç değişmezi: veri kuyruğu sonuç tamponunda bulunmalı");
         for (u, v) in tail.iter_mut().zip(log_den.iter()) {
             let exponent = (usize::from(*v) + log_lead_coeff) % 255;
-            *u ^= EXP_TABLE.get(exponent).copied().unwrap_or(0);
+            *u ^= *EXP_TABLE.get(exponent).expect("Reed-Solomon iç değişmezi: indirgenmiş üs tabloda bulunmalı");
         }
     }
 
@@ -77,7 +90,7 @@ mod ec_tests {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Interleave support
+//{{{ İç içe geçirme desteği
 
 /// Bu metot bir dilim vektörünü tek bir vektöre iç içe geçirir.
 ///
@@ -107,7 +120,7 @@ fn test_interleave() {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ QR code error correction
+//{{{ QR kodu hata düzeltmesi
 
 /// QR kodu matrisine yerleştirilmeye hazır veri ve hata düzeltme kod
 /// kelimelerini kurar.
@@ -116,7 +129,8 @@ fn test_interleave() {
 ///
 /// Verilen sürüm için `ec_level` kullanmak geçerli değilse (örneğin
 /// `EcLevel::H` ile `Version::micro(1)`) `Err(QrError::InvalidVersion)`
-/// döndürür.
+/// döndürür. `rawbits` uzunluğu sürümün veri kod kelimesi sayısıyla
+/// eşleşmiyorsa `Err(QrError::InvalidDataLength)` döndürür.
 pub fn construct_codewords(rawbits: &[u8], version: Version, ec_level: EcLevel) -> QrResult<(Vec<u8>, Vec<u8>)> {
     let (block_1_size, block_1_count, block_2_size, block_2_count) = version.fetch(ec_level, &DATA_BYTES_PER_BLOCK)?;
 
@@ -125,9 +139,9 @@ pub fn construct_codewords(rawbits: &[u8], version: Version, ec_level: EcLevel) 
     let total_size = block_1_end + block_2_size * block_2_count;
 
     // `rawbits` çağırandan gelir, bu yüzden uzunluğu varsayılmak yerine kontrol
-    // edilmeli: körlemesine dilimlemek kısa bir girdide abort'a yol açıyordu.
+    // edilmeli: körlemesine dilimlemek kısa bir girdide sürecin sonlanmasına yol açıyordu.
     if rawbits.len() != total_size {
-        return Err(QrError::DataTooLong);
+        return Err(QrError::InvalidDataLength);
     }
 
     // Veriyi bloklara böl.
@@ -149,10 +163,24 @@ pub fn construct_codewords(rawbits: &[u8], version: Version, ec_level: EcLevel) 
     Ok((blocks_vec, ec_vec))
 }
 
+/// Bir sembolün veri ve hata düzeltme kod kelimesi sayılarını verir.
+pub(crate) fn codeword_lengths(version: Version, ec_level: EcLevel) -> QrResult<(usize, usize)> {
+    let (block_1_size, block_1_count, block_2_size, block_2_count) = version.fetch(ec_level, &DATA_BYTES_PER_BLOCK)?;
+    let blocks_count = block_1_count + block_2_count;
+    let data = block_1_size * block_1_count + block_2_size * block_2_count;
+    let ec_per_block = version.fetch(ec_level, &EC_BYTES_PER_BLOCK)?;
+    Ok((data, ec_per_block * blocks_count))
+}
+
 #[cfg(test)]
 mod construct_codewords_test {
     use crate::ec::construct_codewords;
-    use crate::types::{EcLevel, Version};
+    use crate::types::{EcLevel, QrError, Version};
+
+    #[test]
+    fn test_invalid_raw_length() {
+        assert_eq!(construct_codewords(b"", Version::normal(1).unwrap(), EcLevel::L), Err(QrError::InvalidDataLength));
+    }
 
     #[test]
     fn test_add_ec_simple() {
@@ -183,7 +211,7 @@ mod construct_codewords_test {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Number of allowed errors
+//{{{ İzin verilen hata sayısı
 
 /// Veri gerçekten bozulmadan önce QR koduna eklenebilecek en fazla hatalı
 /// modül sayısını hesaplar.
@@ -262,7 +290,7 @@ mod max_allowed_errors_test {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Precomputed tables for GF(256).
+//{{{ GF(256) için önceden hesaplanmış tablolar
 
 /// `EXP_TABLE`, Galois Alanı GF(256) içinde 2<sup>n</sup> değerini kodlar.
 static EXP_TABLE: &[u8] = b"\
@@ -389,7 +417,7 @@ static GENERATOR_POLYNOMIALS: [&[u8]; 70] = [
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Tables for error correction sizes
+//{{{ Hata düzeltme boyutları tabloları
 
 /// `EC_BYTES_PER_BLOCK`, her sürümde blok başına hata düzeltme için kullanılan
 /// kod kelimesi (bayt) sayısını verir.

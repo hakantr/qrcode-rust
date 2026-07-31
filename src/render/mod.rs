@@ -14,15 +14,15 @@ pub mod unicode;
 /// cinsinden. Bunun üzerindeki her şey ayırıcıya verilmek yerine
 /// `QrError::ImageTooLarge` olarak bildirilir.
 ///
-/// Tavan 2<sup>32</sup> pikseldir: sessiz bölgesiyle birlikte bir sürüm 40
+/// Tavan 2<sup>32</sup>−1 pikseldir: sessiz bölgesiyle birlikte bir sürüm 40
 /// sembolü 185 modül genişliğindedir, yani bu hâlâ modül başına 300 pikselin
 /// çok üzerine — pratikte hiçbir çizimin gerektirmeyeceği kadarına — izin
-/// verirken düşmanca bir `module_dimensions` isteğinin süreci abort etmesini
+/// verirken düşmanca bir `module_dimensions` isteğinin süreci sonlandırmasını
 /// engeller.
-pub const MAX_IMAGE_PIXELS: u64 = 1 << 32;
+pub const MAX_IMAGE_PIXELS: u64 = 4_294_967_295;
 
 //------------------------------------------------------------------------------
-//{{{ Pixel trait
+//{{{ Piksel trait'i
 
 /// Bir görüntü pikselinin soyutlaması.
 pub trait Pixel: Copy + Sized {
@@ -50,13 +50,32 @@ pub trait Canvas: Sized {
     type Image: Sized;
 
     /// Verilen boyutlarda yeni bir tuval kurar.
+    ///
+    /// Bu düşük seviyeli metot normalde [`Renderer::try_build`] tarafından
+    /// çağrılır. Doğrudan çağıranlar `width * height <= MAX_IMAGE_PIXELS`
+    /// sözleşmesine uymalıdır.
+    ///
+    /// # Panics
+    ///
+    /// Boyutlar bu sözleşmeyi ihlal ederse veya bellek ayrılamazsa arka uç
+    /// panikleyebilir.
     fn new(width: u32, height: u32, dark_pixel: Self::Pixel, light_pixel: Self::Pixel) -> Self;
 
     /// (x, y) koordinatına tek bir koyu piksel çizer.
+    ///
+    /// # Panics
+    ///
+    /// Koordinat [`Canvas::new`] ile kurulan tuvalin dışındaysa arka uç
+    /// panikleyebilir. `Renderer` bu sözleşmeyi her zaman korur.
     fn draw_dark_pixel(&mut self, x: u32, y: u32);
 
     /// (`left`, `top`) koordinatına `width`×`height` boyutlarında koyu bir
     /// dikdörtgen çizer.
+    ///
+    /// # Panics
+    ///
+    /// Dikdörtgen tuvalin dışına taşıyorsa arka uç panikleyebilir. `Renderer`
+    /// bu sözleşmeyi her zaman korur.
     fn draw_dark_rect(&mut self, left: u32, top: u32, width: u32, height: u32) {
         for y in top..(top + height) {
             for x in left..(left + width) {
@@ -71,10 +90,10 @@ pub trait Canvas: Sized {
 
 //}}}
 //------------------------------------------------------------------------------
-//{{{ Renderer
+//{{{ Çizici
 
 /// Bir QR kodu çizici. Bir bool vektörünü görüntüye dönüştüren bir kurucu
-/// (builder) tiptir.
+/// tipidir.
 pub struct Renderer<'a, P: Pixel> {
     content: &'a [Color],
     modules_count: u32, // <- `width` ile karışmasın diye burada `modules_count` diyoruz.
@@ -96,7 +115,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     /// için [`Renderer::try_new`] kullanın.
     pub fn new(content: &'a [Color], modules_count: usize, quiet_zone: u32) -> Self {
         #[expect(clippy::expect_used, reason = "belgelenmiş panik; kontrollü biçim try_new")]
-        Self::try_new(content, modules_count, quiet_zone).expect("content uzunluğu modules_count ile uyuşmuyor")
+        Self::try_new(content, modules_count, quiet_zone).expect("içerik uzunluğu modül sayısıyla uyuşmuyor")
     }
 
     /// Yeni bir çizici oluşturur; uyuşmayan `content`'i paniklemek yerine bildirir.
@@ -104,7 +123,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     /// # Errors
     ///
     /// `content`'in uzunluğu tam olarak `modules_count * modules_count` değilse
-    /// ya da `modules_count` bir `u32`'ye sığmıyorsa
+    /// `Err(QrError::InvalidDataLength)`, `modules_count` bir `u32`'ye sığmıyorsa
     /// `Err(QrError::ImageTooLarge)` döndürür.
     ///
     /// Çarpma kontrollüdür; yani devasa bir `modules_count`, tesadüfen uyan bir
@@ -112,7 +131,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     pub fn try_new(content: &'a [Color], modules_count: usize, quiet_zone: u32) -> QrResult<Self> {
         let area = modules_count.checked_mul(modules_count).ok_or(QrError::ImageTooLarge)?;
         if area != content.len() {
-            return Err(QrError::ImageTooLarge);
+            return Err(QrError::InvalidDataLength);
         }
         let modules_count = u32::try_from(modules_count).or(Err(QrError::ImageTooLarge))?;
         Ok(Renderer {
@@ -145,7 +164,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     }
 
     /// Her modülün piksel cinsinden boyutunu ayarlar. Varsayılan 8px.
-    #[deprecated(since = "0.4.0", note = "use `.module_dimensions(width, width)` instead")]
+    #[deprecated(since = "0.4.0", note = "bunun yerine `.module_dimensions(width, width)` kullanın")]
     pub fn module_size(&mut self, width: u32) -> &mut Self {
         self.module_dimensions(width, width)
     }
@@ -164,7 +183,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     /// Örneğin bir sürüm 1 QR kodu sessiz bölgesiyle 19 modül genişliğindedir.
     /// ≥200px genişlikte bir görüntü istersek her modülün boyutu 11px olur,
     /// yani gerçek görüntü boyutu 209px olur.
-    #[deprecated(since = "0.4.0", note = "use `.min_dimensions(width, width)` instead")]
+    #[deprecated(since = "0.4.0", note = "bunun yerine `.min_dimensions(width, width)` kullanın")]
     pub fn min_width(&mut self, width: u32) -> &mut Self {
         self.min_dimensions(width, width)
     }
@@ -188,7 +207,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     /// Sessiz bölge dahil, tamamlanmış görüntüdeki modül sayısı.
     ///
     /// En az 1'e kırpılır: boş bir QR kodunun modülü yoktur ve istenen görüntü
-    /// boyutunu sıfıra bölmek aksi hâlde abort'a yol açardı.
+    /// boyutunu sıfıra bölmek aksi hâlde sürecin sonlanmasına yol açardı.
     fn width_in_modules(&self) -> u32 {
         let quiet_zone = if self.has_quiet_zone { 2 } else { 0 } * self.quiet_zone;
         self.modules_count.saturating_add(quiet_zone).max(1)
@@ -212,7 +231,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     }
 
     /// QR kodunu bir görüntüye çizer.
-    #[deprecated(since = "0.4.0", note = "renamed to `.build()` to de-emphasize the image connection")]
+    #[deprecated(since = "0.4.0", note = "görüntü bağını geri plana almak için adı `.build()` oldu")]
     pub fn to_image(&self) -> P::Image {
         self.build()
     }
@@ -237,6 +256,17 @@ impl<'a, P: Pixel> Renderer<'a, P> {
     /// boyutlar veriyorsa `Err(QrError::ImageTooLarge)` döndürür. Bu kontrol
     /// olmadan release derlemelerinde sarmalanır ve sessizce yanlış boyutta bir
     /// görüntü üretir.
+    ///
+    /// # Panics
+    ///
+    /// Yalnızca özel `Renderer` alanlarının, [`Renderer::try_new`] tarafından
+    /// kurulan içerik uzunluğu değişmezini ihlal etmesi durumunda panikler. Bir
+    /// arka uç uygulaması veya bellek ayırıcı ayrıca kendi belgelenmiş
+    /// koşullarında panikleyebilir.
+    #[expect(
+        clippy::expect_used,
+        reason = "Renderer::try_new içerik uzunluğunu modül alanına eşitler ve alanlar daha sonra özel kalır"
+    )]
     pub fn try_build(&self) -> QrResult<P::Image> {
         let w = self.modules_count;
         let qz = if self.has_quiet_zone { self.quiet_zone } else { 0 };
@@ -248,7 +278,7 @@ impl<'a, P: Pixel> Renderer<'a, P> {
 
         // Arka uçlar `real_width * real_height` öğeyi baştan ayırır. Bu kontrol
         // olmadan yeterince büyük bir istek `Vec`'e doymuş bir uzunlukla ulaşır ve
-        // çağıranın yakalayamayacağı bir kapasite taşmasıyla süreci abort eder.
+        // çağıranın yakalayamayacağı bir kapasite taşmasıyla süreci sonlandırır.
         // `MAX_IMAGE_PIXELS`, "ayrılamayacak kadar büyük"ü sıradan bir hataya
         // çeviren tek yerdir.
         let area = u64::from(real_width) * u64::from(real_height);
@@ -261,7 +291,12 @@ impl<'a, P: Pixel> Renderer<'a, P> {
         for y in 0..width {
             for x in 0..width {
                 if qz <= x && x < w + qz && qz <= y && y < w + qz {
-                    if self.content.get(i).copied() != Some(Color::Light) {
+                    let color = self
+                        .content
+                        .get(i)
+                        .copied()
+                        .expect("Renderer iç değişmezi: içerik alanı modül sayısıyla eşleşmeli");
+                    if color != Color::Light {
                         canvas.draw_dark_rect(x * mw, y * mh, mw, mh);
                     }
                     i += 1;

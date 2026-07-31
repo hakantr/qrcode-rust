@@ -1,7 +1,7 @@
 //! Çizicileri rastgele boyutlandırma istekleri üzerinde sürer.
 //!
 //! Boyutlandırma aritmetiği, bir `u32` taşmasının eskiden sessizce sarmalanıp
-//! yanlış boyutta bir görüntü ürettiği yerdir. Buradaki her şey, abort etmek
+//! yanlış boyutta bir görüntü ürettiği yerdir. Buradaki her şey, süreci sonlandırmak
 //! yerine bildirmesi gereken `try_` biçimlerinden geçer.
 //!
 //! Boyutlar tüm `u32` aralığı yerine iki banttan çekilir. İlginç durumlar
@@ -56,6 +56,12 @@ struct Input {
 }
 
 fuzz_target!(|input: Input| {
+    // Modül sayısı sıfır olan yoğun Unicode arka ucu eskiden satır genişliği
+    // sıfırken `chunks_exact(0)` çağırıyordu.
+    let _ = Renderer::<qrcode::render::unicode::Dense1x2>::try_new(&[], 0, 0)
+        .expect("boş çizici geçerli olmalı")
+        .try_build();
+
     // Elle kurulmuş bir çizici; `modules_count` muhtemelen içerik uzunluğuyla
     // uyuşmuyor.
     let content = [Color::Dark, Color::Light, Color::Light, Color::Dark];
