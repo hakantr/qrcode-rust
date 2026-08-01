@@ -225,14 +225,29 @@ pub fn max_allowed_errors(version: Version, ec_level: EcLevel) -> QrResult<usize
     use crate::EcLevel::{L, M};
     use crate::types::VersionKind::{Micro, Normal};
 
-    // `p`, ISO/IEC 18004:2006 §6.5.1 Tablo 9'daki yanlış-kod-çözme koruma kod
-    // kelimesi sayısıdır: hata *düzeltmeye* değil, yalnızca hata saptamaya
-    // ayrılır, bu yüzden düzeltilebilir hata sayısından düşülür.
+    // `p`, yanlış-kod-çözme koruma kod kelimesi sayısıdır: hata *düzeltmeye*
+    // değil, yalnızca hata saptamaya ayrılır, bu yüzden düzeltilebilir hata
+    // sayısından düşülür. ISO/IEC 18004:2000 §8.5.1 (Micro QR öncesi baskı)
+    // formülü şöyle veriyor:
     //
-    // Her Micro sembolü en az iki koruma kod kelimesi harcar; eskiden yalnızca
-    // L seviyesi ile M2-M için düşülüyor, M3-M / M4-M / M4-Q ise koruma
-    // kod kelimelerini düzeltme bütçesi sayarak kapasiteyi olduğundan yüksek
-    // bildiriyordu.
+    //     e + 2t <= d - p        e = silinti, t = hata, d = ec kod kelimesi
+    //
+    // Aşağıdaki `(ec_bytes - p) / 2` bunun e = 0 hâli.
+    //
+    // NORMAL QR -- birincil kaynakla doğrulandı. ISO/IEC 18004:2000 §8.5.1,
+    // kelimesi kelimesine: "p = 3 in version 1-L symbols, p = 2 in version 1-M
+    // and 2-L symbols, p = 1 in version 1-Q, 1-H and 3-L symbols, p = 0 in all
+    // other cases." Aşağıdaki üç normal kol tam olarak budur.
+    //
+    // MICRO QR -- ÇIKARIM, henüz doğrulanmadı. Micro QR 2006 ikinci baskıda
+    // eklendi ve elimizdeki 2000 baskısında yok; §6.5.1 Tablo 9'un metnine
+    // erişilemedi. Her Micro sembolüne p >= 2 uygulanıyor. Gerekçe: M1, M2-L,
+    // M2-M, M3-L ve M4-L zaten p >= 2 harcarken M3-M / M4-M / M4-Q'nun tek
+    // başına p = 0 olması yapısal olarak tutarsız; ayrıca p = 2 ile düzeltme
+    // oranları standardın nominal %7/%15/%25 değerlerine yaklaşıyor
+    // (ör. M4-Q: %29 -> %25). ISO/IEC 18004:2006 veya sonrası Tablo 9 eline
+    // geçen biri bunu teyit etmeli -- çelişirse burayı ve
+    // `max_allowed_errors_test::test_low_versions` iddialarını düzeltin.
     let p = match (version.kind(), ec_level) {
         (Micro(2) | Normal(1), L) => 3,
         (Micro(_), _) | (Normal(2), L) | (Normal(1), M) => 2,
