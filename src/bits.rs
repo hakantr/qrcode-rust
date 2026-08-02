@@ -22,12 +22,26 @@ pub struct Bits {
     data: Vec<u8>,
     bit_offset: usize,
     version: Version,
+    // ISO/IEC 18004:2024 §7.4.9'un sıra/teklik kurallarını uygulamak ve Ek F
+    // sembol tanımlayıcısının `m` değerini türetmek için tutulan durum.
+    eci_used: bool,
+    fnc1_first_used: bool,
+    fnc1_second_used: bool,
+    data_started: bool,
 }
 
 impl Bits {
     /// Yeni, boş bir bit yapısı kurar.
     pub const fn new(version: Version) -> Self {
-        Self { data: Vec::new(), bit_offset: 0, version }
+        Self {
+            data: Vec::new(),
+            bit_offset: 0,
+            version,
+            eci_used: false,
+            fnc1_first_used: false,
+            fnc1_second_used: false,
+            data_started: false,
+        }
     }
 
     /// Bitlerin sonuna N bitlik büyük-endian bir tam sayı ekler.
@@ -199,12 +213,53 @@ impl Bits {
     /// Mod verilen sürümde desteklenmiyorsa bu metot
     /// `Err(QrError::UnsupportedCharacterSet)` döndürür.
     pub fn push_mode_indicator(&mut self, mode: ExtendedMode) -> QrResult<()> {
+        self.validate_segment_order(mode)?;
         if let Some(number) = self.mode_indicator_number(mode)? {
             // Kapalı `ExtendedMode` enumunun yukarıdaki eşlemesi, sayının sürümün
             // mod alanına sığdığını garanti eder.
             self.push_number(self.version.mode_bits_count(), number);
         }
+        match mode {
+            ExtendedMode::Eci => self.eci_used = true,
+            ExtendedMode::Data(_) => self.data_started = true,
+            ExtendedMode::Fnc1First => self.fnc1_first_used = true,
+            ExtendedMode::Fnc1Second => self.fnc1_second_used = true,
+            ExtendedMode::StructuredAppend => {}
+        }
         Ok(())
+    }
+
+    /// ISO/IEC 18004:2024 §7.4.9 ve §8'in gösterge sıralama kurallarını
+    /// uygular: FNC1 göstergesi sembolde bir kez, ilk veri modundan önce ve
+    /// varsa ECI/Structured Append başlığından sonra gelmelidir; Structured
+    /// Append başlığı bit akışının en başında durmalıdır.
+    fn validate_segment_order(&self, mode: ExtendedMode) -> QrResult<()> {
+        let fnc1_used = self.fnc1_first_used || self.fnc1_second_used;
+        let valid = match mode {
+            ExtendedMode::StructuredAppend => self.is_empty(),
+            ExtendedMode::Fnc1First | ExtendedMode::Fnc1Second => !fnc1_used && !self.data_started,
+            // Bir FNC1 göstergesi eklendiyse ilk veri modu onu hemen izlemeli;
+            // araya ECI giremez. Veri başladıktan sonra yeni ECI parçaları
+            // serbesttir (§7.4.3.3, çoklu ECI).
+            ExtendedMode::Eci => self.data_started || !fnc1_used,
+            ExtendedMode::Data(_) => true,
+        };
+        if valid { Ok(()) } else { Err(QrError::InvalidSegment) }
+    }
+
+    /// Bitlere bir ECI tanımlayıcısı eklenip eklenmediği.
+    pub const fn eci_used(&self) -> bool {
+        self.eci_used
+    }
+
+    /// Birinci konumda FNC1 göstergesi eklenip eklenmediği.
+    pub const fn fnc1_first_used(&self) -> bool {
+        self.fnc1_first_used
+    }
+
+    /// İkinci konumda FNC1 göstergesi eklenip eklenmediği.
+    pub const fn fnc1_second_used(&self) -> bool {
+        self.fnc1_second_used
     }
 }
 
@@ -746,6 +801,8 @@ impl Bits {
     /// Mod verilen sürümde desteklenmiyorsa bu metot
     /// `Err(QrError::UnsupportedCharacterSet)` döndürür.
     pub fn push_fnc1_first_position(&mut self) -> QrResult<()> {
+        // Sıra kuralları (bir kez, ilk veri modundan önce, ECI'den sonra)
+        // `push_mode_indicator` içinde doğrulanır.
         self.push_mode_indicator(ExtendedMode::Fnc1First)
     }
 
@@ -778,6 +835,53 @@ impl Bits {
         self.push_mode_indicator(ExtendedMode::Fnc1Second)?;
         self.push_number(8, u16::from(application_indicator));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod segment_order_tests {
+    use crate::bits::Bits;
+    use crate::types::{QrError, Version};
+
+    /// ISO/IEC 18004:2024 §7.4.9.2 Örnek 1'in sıralaması: FNC1 göstergesi,
+    /// ardından sayısal ve alfasayısal veri modları.
+    #[test]
+    fn test_fnc1_before_data_is_valid() {
+        let mut bits = Bits::new(Version::normal(3).unwrap());
+        assert_eq!(bits.push_fnc1_first_position(), Ok(()));
+        assert_eq!(bits.push_numeric_data(b"01049123451234591597033130128"), Ok(()));
+        assert_eq!(bits.push_alphanumeric_data(b"%10ABC123"), Ok(()));
+        assert!(bits.fnc1_first_used());
+    }
+
+    #[test]
+    fn test_fnc1_after_data_is_rejected() {
+        let mut bits = Bits::new(Version::normal(1).unwrap());
+        assert_eq!(bits.push_numeric_data(b"123"), Ok(()));
+        assert_eq!(bits.push_fnc1_first_position(), Err(QrError::InvalidSegment));
+        assert_eq!(bits.push_fnc1_second_position(37), Err(QrError::InvalidSegment));
+    }
+
+    #[test]
+    fn test_second_fnc1_is_rejected() {
+        let mut bits = Bits::new(Version::normal(1).unwrap());
+        assert_eq!(bits.push_fnc1_first_position(), Ok(()));
+        assert_eq!(bits.push_fnc1_first_position(), Err(QrError::InvalidSegment));
+        assert_eq!(bits.push_fnc1_second_position(37), Err(QrError::InvalidSegment));
+    }
+
+    /// FNC1 "varsa ECI'den sonra" gelmelidir; yani FNC1 ile ilk veri modunun
+    /// arasına ECI giremez, ama hem ECI -> FNC1 sırası hem de veri başladıktan
+    /// sonra yeni ECI parçaları (§7.4.3.3) serbesttir.
+    #[test]
+    fn test_eci_ordering_around_fnc1() {
+        let mut bits = Bits::new(Version::normal(2).unwrap());
+        assert_eq!(bits.push_eci_designator(9), Ok(()));
+        assert_eq!(bits.push_fnc1_first_position(), Ok(()));
+        assert_eq!(bits.push_eci_designator(9), Err(QrError::InvalidSegment));
+        assert_eq!(bits.push_byte_data(b"data"), Ok(()));
+        assert_eq!(bits.push_eci_designator(3), Ok(()));
+        assert!(bits.eci_used());
     }
 }
 

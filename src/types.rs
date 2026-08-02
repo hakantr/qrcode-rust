@@ -29,7 +29,10 @@ pub enum QrError {
     /// Karakter kümesine ait olmayan bir karakter bulundu.
     InvalidCharacter,
 
-    /// Bir veri parçasının sınırları geçersiz.
+    /// Bir veri parçasının sınırları ya da sırası geçersiz; örneğin bir FNC1
+    /// göstergesinin veriden sonra ya da ikinci kez eklenmesi (ISO/IEC
+    /// 18004:2024 §7.4.9), veya bir Structured Append başlığının bit akışının
+    /// başında olmaması (§8).
     InvalidSegment,
 
     /// Verilen veri uzunluğu API'nin beklediği uzunlukla eşleşmiyor.
