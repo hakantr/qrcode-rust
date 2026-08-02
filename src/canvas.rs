@@ -1553,7 +1553,7 @@ impl Canvas {
         }
         self.validate_ready_for_data()?;
 
-        // ISO/IEC 18004:2006 Tablo 7 §6.4.10: M1 ve M3 sembolleri 8'in katı olmayan
+        // ISO/IEC 18004:2024 Tablo 7 (§7.4.11; 2015: §7.4.10): M1 ve M3 sembolleri 8'in katı olmayan
         // sayıda veri biti (20 ve 84/68) tutar, yani son veri kod kelimeleri yalnızca
         // 4 bit genişliğindedir. Bu, yalnızca `M` için değil, M3'ün *her iki* hata
         // düzeltme seviyesi için geçerlidir.
@@ -1597,7 +1597,7 @@ mod draw_codewords_test {
     /// düzeltme verisinin kuyruğunu sessizce düşürür, bir bit eksiği modülleri
     /// boş bırakır.
     ///
-    /// M3-L'nin, ISO/IEC 18004:2006 §6.4.10'un gerektirdiği 4 bitlik kod kelimesi
+    /// M3-L'nin, ISO/IEC 18004:2024 §7.4.11'in (2015: §7.4.10) gerektirdiği 4 bitlik kod kelimesi
     /// yerine tam bir sondaki veri kod kelimesiyle çizildiğini yakalayan da budur.
     #[test]
     fn test_codeword_bits_match_module_count() {
@@ -1621,7 +1621,8 @@ mod draw_codewords_test {
                 let modules_count =
                     DataModuleIter::new(version).filter(|&(x, y)| !is_functional(version, x, y)).count();
 
-                // Artakalanlar, ISO/IEC 18004:2006 §6.7.2, Tablo 1'deki, tasarım gereği
+                // Artakalanlar, ISO/IEC 18004 §7.1, Tablo 1'deki (2015 ve 2024'te
+                // aynı yerde), tasarım gereği
                 // kullanılmadan bırakılan "kalan bitler"dir.
                 let remainder_bits = match version.kind() {
                     VersionKind::Normal(2..=6) => 7,
@@ -2029,17 +2030,16 @@ impl Canvas {
 
     /// Dengesiz koyu/açık oranının ceza puanını hesaplar.
     ///
-    /// Puan, koyu modüllerin %50 oranından sapmasıyla doğrusal olarak verilir.
-    /// Mümkün olan en yüksek puan 100'dür.
-    ///
-    /// Bu algoritmanın standarttan biraz farklı olduğuna dikkat edin: sonucu her
-    /// %5'te bir yuvarlamıyoruz, ama fark ihmal edilebilir olmalı ve hangi
-    /// maskenin seçileceğini etkilememeli.
+    /// ISO/IEC 18004:2024 §7.8.3 (2015: §7.8.3.1): koyu modül oranının %50'den
+    /// sapması %5'lik basamaklara bölünür ve her tam basamak N4 = 10 puan
+    /// ekler; %45 ile %55 arası 0 puandır. Mümkün olan en yüksek puan 100'dür.
     fn compute_balance_penalty_score(&self) -> u32 {
         let dark_modules = self.modules.iter().filter(|m| m.is_dark()).count();
         let total_modules = self.modules.len();
-        let ratio = dark_modules * 200 / total_modules;
-        u32::from(ratio.abs_diff(100).as_u16())
+        // floor(|koyu% - 50| / 5), tam sayı aritmetiğiyle: her iki taraf da
+        // `total_modules` ile ölçeklenirse |20*koyu - 10*toplam| / toplam olur.
+        let steps = (dark_modules * 20).abs_diff(total_modules * 10) / total_modules;
+        u32::from((steps * 10).as_u16())
     }
 
     /// Kenarlarda fazla sayıda açık modül bulunmasının ceza puanını hesaplar.
@@ -2146,8 +2146,10 @@ mod penalty_tests {
 
     #[test]
     fn test_penalty_score_balance() {
+        // Test tuvalinde koyu oran %51 civarındadır; %50'den sapma ilk %5'lik
+        // basamağın içinde kaldığı için standardın formülü 0 puan verir.
         let c = create_test_canvas();
-        assert_eq!(c.compute_balance_penalty_score(), 2);
+        assert_eq!(c.compute_balance_penalty_score(), 0);
     }
 
     #[test]
