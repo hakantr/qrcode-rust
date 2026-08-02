@@ -372,7 +372,7 @@ impl Bits {
 /// olarak kodlanır. `numeric_digit` tek bir karakteri karşılık gelen 10 tabanlı
 /// rakama, ASCII rakamı değilse `None`'a dönüştürür.
 ///
-/// Dönüşüm ISO/IEC 18004:2006, §8.4.2'de tanımlanmıştır.
+/// Dönüşüm ISO/IEC 18004:2024, §7.4.4'te (2015: §7.4.3) tanımlanmıştır.
 #[inline]
 const fn numeric_digit(character: u8) -> Option<u16> {
     match character {
@@ -460,7 +460,7 @@ mod numeric_tests {
 /// tabanlı bir tam sayı olarak kodlanır. `alphanumeric_digit` her karakteri
 /// karşılık gelen 45 tabanlı rakama dönüştürür.
 ///
-/// Dönüşüm ISO/IEC 18004:2006, §8.4.3, Tablo 5'te tanımlanmıştır.
+/// Dönüşüm ISO/IEC 18004:2024, §7.4.5, Tablo 5'te (2015: §7.4.4) tanımlanmıştır.
 ///
 /// Karakter alfanümerik karakter kümesinin dışındaysa `None` döndürür.
 #[inline]
@@ -651,7 +651,7 @@ impl Bits {
 fn kanji_number(kanji: &[u8]) -> Option<u16> {
     let &[hi, lo] = kanji else { return None };
     let cp = u16::from(hi) * 256 + u16::from(lo);
-    // ISO/IEC 18004:2006 §8.4.5 — yalnızca bu iki aralık bir Kanji modu
+    // ISO/IEC 18004:2024 §7.4.7 (2015: §7.4.6) — yalnızca bu iki aralık bir Kanji modu
     // karakterinin 13 bitine sıkıştırılabilir.
     let bytes = match cp {
         0x8140..=0x9ffc => cp - 0x8140,
@@ -771,7 +771,8 @@ impl Bits {
 //------------------------------------------------------------------------------
 //{{{ Sonlandırma
 
-// Bu tablo ISO/IEC 18004:2006 §6.4.10, Tablo 7'den kopyalanmıştır.
+// Bu tablo ISO/IEC 18004:2024 §7.4.11, Tablo 7'den (2015: §7.4.10)
+// kopyalanmıştır; iki baskının değerleri birebir aynıdır.
 static DATA_LENGTHS: [[usize; 4]; 44] = [
     // Normal sürümler
     [152, 128, 104, 72],
@@ -1096,7 +1097,7 @@ mod encode_tests {
 /// `Err(QrError::DataTooLong)` döndürür.
 pub fn encode_auto(data: &[u8], ec_level: EcLevel) -> QrResult<Bits> {
     let segments = Parser::new(data)?.collect::<Vec<Segment>>();
-    // ISO/IEC 18004:2006 Tablo 3'teki üç karakter sayısı biti grubunun sınırları;
+    // ISO/IEC 18004:2024 Tablo 3'teki üç karakter sayısı biti grubunun sınırları;
     // her grubun en büyük sembolü.
     for version in [Version::normal(9)?, Version::normal(26)?, Version::normal(40)?] {
         let opt_segments = Optimizer::new(segments.iter().copied(), version).collect::<Vec<_>>();
