@@ -1,5 +1,6 @@
 //! Bir veri parçasını kodlamak için en uygun veri modu dizisini bulur.
 use crate::types::{Mode, QrError, QrResult, Version};
+use alloc::vec::Vec;
 use core::slice::Iter;
 
 /// Standart bir QR kodunun alabileceği en uzun ham girdi.
@@ -306,93 +307,103 @@ mod parse_tests {
 //{{{ İyileştirici
 
 /// QR kodu veri optimize edici.
-pub struct Optimizer<I> {
-    parser: I,
-    last_segment: Segment,
-    last_segment_size: usize,
-    version: Version,
-    ended: bool,
+///
+/// Ayrıştırıcının ürettiği komşu parçaları, toplam kodlanmış bit uzunluğunu
+/// en aza indiren bölümlemeye dinamik programlamayla yeniden ayırır. Parça
+/// sınırları çalışma (aynı karakter sınıfından ardışık dizi) sınırları
+/// üzerinde seçilir; ISO/IEC 18004:2024 Ek J'nin eşik kuralları bu optimumun
+/// yaklaşık bir sezgiselidir, burada optimum doğrudan hesaplanır. Komşu
+/// olmayan parça zincirleri birbirinden bağımsız optimize edilir.
+pub struct Optimizer {
+    segments: alloc::vec::IntoIter<Segment>,
 }
 
-impl<I: Iterator<Item = Segment>> Optimizer<I> {
-    /// Mümkün olduğunda komşu parçaları birleştirerek parçaları optimize eder.
-    ///
-    /// Şu anda bu metot açgözlü bir algoritma kullanır: yeni parça öncekinden
-    /// uzun olana dek parçaları soldan sağa birleştirir. Bu metot ISO
-    /// standardındaki Ek J'yi kullan*maz*.
-    pub fn new(mut segments: I, version: Version) -> Self {
-        match segments.next() {
-            None => Self {
-                parser: segments,
-                last_segment: Segment { mode: Mode::Numeric, begin: 0, end: 0 },
-                last_segment_size: 0,
-                version,
-                ended: true,
-            },
-            Some(segment) => Self {
-                parser: segments,
-                last_segment: segment,
-                last_segment_size: segment.encoded_len(version),
-                version,
-                ended: false,
-            },
+impl Optimizer {
+    /// Verilen parça dizisini, toplam bit uzunluğu en düşük olacak biçimde
+    /// yeniden bölümler.
+    pub fn new<I: Iterator<Item = Segment>>(segments: I, version: Version) -> Self {
+        let mut result = Vec::new();
+        let mut chain: Vec<Segment> = Vec::new();
+        for segment in segments {
+            // Kamu kurucusu tek tek parçaları doğrular; farklı veri
+            // aralıklarına ait, komşu olmayan parçaları birleştirmek ise
+            // anlamlı değildir. Zinciri burada keseriz.
+            if chain.last().is_some_and(|last| last.end != segment.begin) {
+                optimize_chain(&chain, version, &mut result);
+                chain.clear();
+            }
+            chain.push(segment);
         }
+        optimize_chain(&chain, version, &mut result);
+        Self { segments: result.into_iter() }
+    }
+}
+
+/// Komşu `runs` parçalarını en düşük toplam bit uzunluğunu veren bölümlemeyle
+/// `out` içine yazar.
+///
+/// `best[i]`, ilk `i` çalışmanın en düşük toplam uzunluğu; `cut[i]` ise bu
+/// çözümde son parçanın başladığı çalışma indeksidir. Son parçanın adayları
+/// `j..i` aralıkları olduğundan karmaşıklık O(n²)'dir; `j` küçüldükçe aday
+/// parçanın uzunluğu tekdüze arttığından, tek başına `best[i]`'yi aşan aday
+/// bulunduğunda arama erkenden kesilir.
+fn optimize_chain(runs: &[Segment], version: Version, out: &mut Vec<Segment>) {
+    if runs.is_empty() {
+        return;
+    }
+    if runs.len() == 1 {
+        out.push(runs[0]);
+        return;
+    }
+
+    let mut best = alloc::vec![usize::MAX; runs.len() + 1];
+    let mut cut = alloc::vec![0_usize; runs.len() + 1];
+    best[0] = 0;
+    for i in 1..=runs.len() {
+        let mut mode = runs[i - 1].mode;
+        for j in (0..i).rev() {
+            mode = mode.max(runs[j].mode);
+            let candidate = Segment { mode, begin: runs[j].begin, end: runs[i - 1].end };
+            let candidate_len = candidate.encoded_len(version);
+            if best[i] <= candidate_len {
+                break; // daha uzun adaylar yalnızca daha pahalı olabilir
+            }
+            if let Some(total) = best[j].checked_add(candidate_len)
+                && total < best[i]
+            {
+                best[i] = total;
+                cut[i] = j;
+            }
+        }
+    }
+
+    // Bölümleri geriden öne çıkarıp sırayla yaz.
+    let mut boundaries = Vec::new();
+    let mut index = runs.len();
+    while index > 0 {
+        boundaries.push(index);
+        index = cut[index];
+    }
+    let mut begin_run = 0;
+    for &end_run in boundaries.iter().rev() {
+        let mode = runs[begin_run..end_run].iter().fold(runs[begin_run].mode, |mode, run| mode.max(run.mode));
+        out.push(Segment { mode, begin: runs[begin_run].begin, end: runs[end_run - 1].end });
+        begin_run = end_run;
     }
 }
 
 impl Parser<'_> {
     /// Bu ayrıştırıcıya dayalı yeni bir `Optimizer` oluşturur.
-    pub fn optimize(self, version: Version) -> Optimizer<Self> {
+    pub fn optimize(self, version: Version) -> Optimizer {
         Optimizer::new(self, version)
     }
 }
 
-impl<I: Iterator<Item = Segment>> Iterator for Optimizer<I> {
+impl Iterator for Optimizer {
     type Item = Segment;
 
     fn next(&mut self) -> Option<Segment> {
-        if self.ended {
-            return None;
-        }
-
-        loop {
-            match self.parser.next() {
-                None => {
-                    self.ended = true;
-                    return Some(self.last_segment);
-                }
-                Some(segment) => {
-                    let seg_size = segment.encoded_len(self.version);
-
-                    // Kamu kurucusu tek tek parçaları doğrular; farklı veri
-                    // aralıklarına ait, komşu olmayan parçaları birleştirmek ise
-                    // anlamlı değildir. Böyle bir girdiyi olduğu gibi geçiririz.
-                    if self.last_segment.end != segment.begin {
-                        let old_segment = self.last_segment;
-                        self.last_segment = segment;
-                        self.last_segment_size = seg_size;
-                        return Some(old_segment);
-                    }
-
-                    let new_segment = Segment {
-                        mode: self.last_segment.mode.max(segment.mode),
-                        begin: self.last_segment.begin,
-                        end: segment.end,
-                    };
-                    let new_size = new_segment.encoded_len(self.version);
-
-                    if self.last_segment_size + seg_size >= new_size {
-                        self.last_segment = new_segment;
-                        self.last_segment_size = new_size;
-                    } else {
-                        let old_segment = self.last_segment;
-                        self.last_segment = segment;
-                        self.last_segment_size = seg_size;
-                        return Some(old_segment);
-                    }
-                }
-            }
-        }
+        self.segments.next()
     }
 }
 
@@ -518,6 +529,52 @@ mod optimize_tests {
             &[Segment { mode: Mode::Alphanumeric, begin: 0, end: 4 }],
             Version::micro(3).unwrap(),
         );
+    }
+
+    /// ISO/IEC 18004:2024 Ek J.2 c)3'ün eşiği: alfasayısal verinin ortasındaki
+    /// bir sayısal dizi, 1-9 sürüm grubunda ancak 13 karakterden itibaren ayrı
+    /// bir parçaya değer. 12 rakamda tek parça (123 bit), 13 rakamda üçlü
+    /// bölümleme (128 bit) en iyisidir. Eski ikili-açgözlü birleştirici 12
+    /// rakamlık durumda üçlü birleşmeyi göremeyip 124 bitte kalıyordu.
+    #[test]
+    fn test_annex_j_numeric_run_threshold() {
+        let version = Version::normal(1).unwrap();
+        test_optimization_result(
+            &[
+                Segment { mode: Mode::Alphanumeric, begin: 0, end: 4 },
+                Segment { mode: Mode::Numeric, begin: 4, end: 16 },
+                Segment { mode: Mode::Alphanumeric, begin: 16, end: 20 },
+            ],
+            &[Segment { mode: Mode::Alphanumeric, begin: 0, end: 20 }],
+            version,
+        );
+        test_optimization_result(
+            &[
+                Segment { mode: Mode::Alphanumeric, begin: 0, end: 4 },
+                Segment { mode: Mode::Numeric, begin: 4, end: 17 },
+                Segment { mode: Mode::Alphanumeric, begin: 17, end: 21 },
+            ],
+            &[
+                Segment { mode: Mode::Alphanumeric, begin: 0, end: 4 },
+                Segment { mode: Mode::Numeric, begin: 4, end: 17 },
+                Segment { mode: Mode::Alphanumeric, begin: 17, end: 21 },
+            ],
+            version,
+        );
+    }
+
+    /// ISO/IEC 18004:2024 Ek J.3.2'nin işlenmiş örneği: "123456ABCDEFGH"
+    /// verisi (6 sayısal + 8 alfasayısal), mod ve karakter sayısı göstergeleri
+    /// dahil M3'te toplam 77, M4'te 81 bit tutar.
+    #[test]
+    fn test_annex_j_micro_capacity_example() {
+        use crate::optimize::Parser;
+        for (version, expected_bits) in
+            [(Version::micro(3).unwrap(), 77), (Version::micro(4).unwrap(), 81)]
+        {
+            let segments = Parser::new(b"123456ABCDEFGH").unwrap().optimize(version).collect::<Vec<_>>();
+            assert_eq!(total_encoded_len(&segments, version), Ok(expected_bits));
+        }
     }
 }
 

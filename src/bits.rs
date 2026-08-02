@@ -18,6 +18,10 @@ use crate::types::{EcLevel, Mode, QrError, QrResult, Version, VersionKind};
 
 /// `Bits` yapısı bir QR kodu için kodlanmış veriyi saklar.
 #[derive(Clone)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "bayraklar birbirinden bağımsız akış durumlarını izler; birleştirmek okunurluğu düşürür"
+)]
 pub struct Bits {
     data: Vec<u8>,
     bit_offset: usize,
@@ -1342,10 +1346,11 @@ mod capacity_boundary_tests {
     /// [sayısal, alfasayısal, bayt, Kanji]).
     #[test]
     fn test_table_7_spot_values() {
+        type Row = (Version, EcLevel, &'static [(Mode, usize)]);
         let micro = |n| Version::micro(n).unwrap();
         let normal = |n| Version::normal(n).unwrap();
         #[rustfmt::skip]
-        let expected: &[(Version, EcLevel, &[(Mode, usize)])] = &[
+        let expected: &[Row] = &[
             (micro(1), EcLevel::L, &[(Mode::Numeric, 5)]),
             (micro(2), EcLevel::L, &[(Mode::Numeric, 10), (Mode::Alphanumeric, 6)]),
             (micro(2), EcLevel::M, &[(Mode::Numeric, 8), (Mode::Alphanumeric, 5)]),

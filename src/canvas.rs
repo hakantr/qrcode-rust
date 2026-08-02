@@ -1840,6 +1840,11 @@ mod mask_tests {
     /// "011" ifadesi standardın kendi yazım hatasıdır, hesap 010 ile ilerler)
     /// ve M2-L (sembol numarası 001) + maske 01.
     #[test]
+    #[expect(
+        clippy::unreadable_literal,
+        clippy::unusual_byte_groupings,
+        reason = "bit dizileri ve indeks alanları standardın Ek I gösterimiyle birebir"
+    )]
     fn test_annex_i_format_infos() {
         assert_eq!(FORMAT_INFOS_QR[0b00_010], 0b101111001111100);
         assert_eq!(FORMAT_INFOS_MICRO_QR[0b001_01], 0b101000010011001);
