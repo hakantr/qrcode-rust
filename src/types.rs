@@ -123,6 +123,15 @@ impl Not for Color {
 
 /// Hata düzeltme seviyesi. Kodun bir kısmı hasar görse bile özgün bilginin
 /// geri kazanılmasını sağlar.
+///
+/// Seviye seçimi için ISO/IEC 18004:2024 Ek K.2'nin özeti: beklenen baskı
+/// kalitesi düştükçe, ilk okumada başarı önem kazandıkça ya da kodun üzerine
+/// logo bindirilecekse daha yüksek bir seviye seçin. `L` yüksek baskı kalitesi
+/// veya olabilecek en küçük sembol içindir; `M` standart seviyedir ve boyut ile
+/// güvenilirlik arasında iyi bir dengedir; `Q` kritik ya da düşük baskı
+/// kaliteli uygulamalar için "yüksek güvenilirlik" seviyesidir; `H` erişilebilir
+/// en yüksek güvenilirliği sunar. Aynı veri, daha düşük bir seviyeyle daha
+/// küçük bir sembole sığabilir (standardın örneği: sürüm 20-Q yerine 15-L).
 #[derive(Debug, PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
 pub enum EcLevel {
     /// Düşük hata düzeltme. Blokların en fazla %7'sinin hatalı olmasına izin verir.
