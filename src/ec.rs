@@ -227,30 +227,23 @@ pub fn max_allowed_errors(version: Version, ec_level: EcLevel) -> QrResult<usize
 
     // `p`, yanlış-kod-çözme koruma kod kelimesi sayısıdır: hata *düzeltmeye*
     // değil, yalnızca hata saptamaya ayrılır, bu yüzden düzeltilebilir hata
-    // sayısından düşülür. ISO/IEC 18004:2000 §8.5.1 (Micro QR öncesi baskı)
-    // formülü şöyle veriyor:
+    // sayısından düşülür. ISO/IEC 18004:2015 §7.5.1 (2024 baskısında Formül (3),
+    // metin aynı):
     //
     //     e + 2t <= d - p        e = silinti, t = hata, d = ec kod kelimesi
     //
     // Aşağıdaki `(ec_bytes - p) / 2` bunun e = 0 hâli.
     //
-    // NORMAL QR -- birincil kaynakla doğrulandı. ISO/IEC 18004:2000 §8.5.1,
-    // kelimesi kelimesine: "p = 3 in version 1-L symbols, p = 2 in version 1-M
-    // and 2-L symbols, p = 1 in version 1-Q, 1-H and 3-L symbols, p = 0 in all
-    // other cases." Aşağıdaki üç normal kol tam olarak budur.
-    //
-    // MICRO QR -- ÇIKARIM, henüz doğrulanmadı. Micro QR 2006 ikinci baskıda
-    // eklendi ve elimizdeki 2000 baskısında yok; §6.5.1 Tablo 9'un metnine
-    // erişilemedi. Her Micro sembolüne p >= 2 uygulanıyor. Gerekçe: M1, M2-L,
-    // M2-M, M3-L ve M4-L zaten p >= 2 harcarken M3-M / M4-M / M4-Q'nun tek
-    // başına p = 0 olması yapısal olarak tutarsız; ayrıca p = 2 ile düzeltme
-    // oranları standardın nominal %7/%15/%25 değerlerine yaklaşıyor
-    // (ör. M4-Q: %29 -> %25). ISO/IEC 18004:2006 veya sonrası Tablo 9 eline
-    // geçen biri bunu teyit etmeli -- çelişirse burayı ve
-    // `max_allowed_errors_test::test_low_versions` iddialarını düzeltin.
+    // Tüm kollar 2015 ve 2024 baskılarıyla doğrulandı, kelimesi kelimesine:
+    // "p = 3 in version 1-L and M2-L symbols, p = 2 in version 1-M, 2-L, M1,
+    // M2-M, M3-L, and M4-L symbols, p = 1 in version 1-Q, 1-H and 3-L symbols,
+    // p = 0 in all other cases." Tablo 9'un hata düzeltme kapasitesi sütunu da
+    // bunu bağımsız olarak teyit ediyor (ör. M3-M: (17,9,4) -> 4 hata,
+    // M4-Q: (24,10,7) -> 7 hata). Önceki "her Micro sembolüne p >= 2" çıkarımı
+    // M3-M, M4-M ve M4-Q için yanlıştı; standarda göre bu üçünde p = 0.
     let p = match (version.kind(), ec_level) {
         (Micro(2) | Normal(1), L) => 3,
-        (Micro(_), _) | (Normal(2), L) | (Normal(1), M) => 2,
+        (Micro(1), _) | (Micro(2) | Normal(1), M) | (Micro(3 | 4) | Normal(2), L) => 2,
         (Normal(1), _) | (Normal(3), L) => 1,
         _ => 0,
     };
@@ -275,11 +268,11 @@ mod max_allowed_errors_test {
         assert_eq!(Ok(2), max_allowed_errors(Version::micro(2).unwrap(), EcLevel::M));
 
         assert_eq!(Ok(2), max_allowed_errors(Version::micro(3).unwrap(), EcLevel::L));
-        assert_eq!(Ok(3), max_allowed_errors(Version::micro(3).unwrap(), EcLevel::M));
+        assert_eq!(Ok(4), max_allowed_errors(Version::micro(3).unwrap(), EcLevel::M));
 
         assert_eq!(Ok(3), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::L));
-        assert_eq!(Ok(4), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::M));
-        assert_eq!(Ok(6), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::Q));
+        assert_eq!(Ok(5), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::M));
+        assert_eq!(Ok(7), max_allowed_errors(Version::micro(4).unwrap(), EcLevel::Q));
 
         assert_eq!(Ok(2), max_allowed_errors(Version::normal(1).unwrap(), EcLevel::L));
         assert_eq!(Ok(4), max_allowed_errors(Version::normal(1).unwrap(), EcLevel::M));
