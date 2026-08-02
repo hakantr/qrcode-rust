@@ -110,6 +110,26 @@ impl QrCode {
         Self::with_bits(bits, ec_level)
     }
 
+    /// Verilen veriyi, sığdığı en küçük Micro QR kodu sürümüyle kodlayan yeni
+    /// bir Micro QR kodu kurar.
+    ///
+    /// ```
+    /// use qrcode::{EcLevel, QrCode, Version};
+    ///
+    /// let code = QrCode::with_micro(b"01234567", EcLevel::L).unwrap();
+    /// assert_eq!(code.version(), Version::micro(2).unwrap());
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Veri hiçbir Micro QR sürümüne sığmıyorsa `Err(QrError::DataTooLong)`,
+    /// `ec_level` Micro QR'de bulunmayan `EcLevel::H` ise
+    /// `Err(QrError::InvalidVersion)` döndürür.
+    pub fn with_micro<D: AsRef<[u8]>>(data: D, ec_level: EcLevel) -> QrResult<Self> {
+        let bits = bits::encode_auto_micro(data.as_ref(), ec_level)?;
+        Self::with_bits(bits, ec_level)
+    }
+
     /// Verilen sürüm ve hata düzeltme seviyesi için yeni bir QR kodu kurar.
     ///
     /// ```

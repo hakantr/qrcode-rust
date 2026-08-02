@@ -1464,6 +1464,59 @@ pub fn encode_auto(data: &[u8], ec_level: EcLevel) -> QrResult<Bits> {
     Err(QrError::DataTooLong)
 }
 
+/// Verilen veriyi, sığdığı en küçük Micro QR kodu sürümünde otomatik olarak
+/// kodlar — ISO/IEC 18004:2024 §7.1.2'deki "veriyi alan en küçük sembol
+/// sürümünü seç" adımının Micro QR karşılığı.
+///
+/// Sürümler M1'den M4'e sırayla denenir; verinin gerektirdiği modları
+/// desteklemeyen sürümler (ör. alfasayısal veri için M1, bayt verisi için
+/// M1/M2 — Tablo 2) kendiliğinden atlanır.
+///
+/// ```
+/// use qrcode::bits::encode_auto_micro;
+/// use qrcode::types::{EcLevel, Version};
+///
+/// let bits = encode_auto_micro(b"01234567", EcLevel::L).unwrap();
+/// assert_eq!(bits.version(), Version::micro(2).unwrap());
+/// ```
+///
+/// # Errors
+///
+/// Hiçbir Micro QR sürümü `ec_level`'ı desteklemiyorsa (`EcLevel::H`)
+/// `Err(QrError::InvalidVersion)`; veri, seviyeyi destekleyen hiçbir Micro
+/// sürüme sığmıyorsa `Err(QrError::DataTooLong)` döndürür.
+pub fn encode_auto_micro(data: &[u8], ec_level: EcLevel) -> QrResult<Bits> {
+    if ec_level == EcLevel::H {
+        // Hata düzeltme seviyesi H, Micro QR kodlarında yoktur (Tablo 8 notu).
+        return Err(QrError::InvalidVersion);
+    }
+    let segments = Parser::new(data)?.collect::<Vec<Segment>>();
+    for number in 1..=4 {
+        let version = Version::micro(number)?;
+        let Ok(data_capacity) = version.fetch(ec_level, &DATA_LENGTHS) else {
+            continue; // bu sürüm bu hata düzeltme seviyesini desteklemiyor
+        };
+        let opt_segments = Optimizer::new(segments.iter().copied(), version).collect::<Vec<_>>();
+        let Ok(total_len) = total_encoded_len(&opt_segments, version) else {
+            continue;
+        };
+        if total_len > data_capacity {
+            continue;
+        }
+        let mut bits = Bits::new(version);
+        bits.reserve(total_len);
+        match bits.push_segments(data, opt_segments.into_iter()) {
+            Ok(()) => {}
+            // Sürüm, verinin gerektirdiği bir modu taşıyamıyor; sıradakini dene.
+            Err(QrError::UnsupportedCharacterSet) => continue,
+            Err(e) => return Err(e),
+        }
+        bits.push_terminator(ec_level)?;
+        return Ok(bits);
+    }
+    Err(QrError::DataTooLong)
+}
+
 /// Verilen hata düzeltme seviyesinde N bitlik veriyi saklayabilen en küçük
 /// sürümü (yalnızca QR kodu) bulur.
 ///
@@ -1507,8 +1560,29 @@ fn find_min_version(length: usize, ec_level: EcLevel) -> QrResult<Version> {
 
 #[cfg(test)]
 mod encode_auto_tests {
-    use crate::bits::{encode_auto, find_min_version};
-    use crate::types::{EcLevel, Version};
+    use crate::bits::{encode_auto, encode_auto_micro, find_min_version};
+    use crate::types::{EcLevel, QrError, Version};
+
+    /// Tablo 7'ye göre en küçük Micro sürüm seçilmeli: M1-L 5 rakam, M2-L
+    /// 10 rakam / 6 alfasayısal alır; bayt modu ancak M3'te başlar (Tablo 2);
+    /// Q seviyesi yalnızca M4'te vardır.
+    #[test]
+    fn test_encode_auto_micro_smallest_version() {
+        let version = |bits: crate::bits::Bits| bits.version();
+        assert_eq!(version(encode_auto_micro(b"12345", EcLevel::L).unwrap()), Version::micro(1).unwrap());
+        assert_eq!(version(encode_auto_micro(b"01234567", EcLevel::L).unwrap()), Version::micro(2).unwrap());
+        assert_eq!(version(encode_auto_micro(b"ABCDEF", EcLevel::L).unwrap()), Version::micro(2).unwrap());
+        assert_eq!(version(encode_auto_micro(b"\x01\x02\x03", EcLevel::L).unwrap()), Version::micro(3).unwrap());
+        assert_eq!(version(encode_auto_micro(b"1", EcLevel::Q).unwrap()), Version::micro(4).unwrap());
+    }
+
+    #[test]
+    fn test_encode_auto_micro_errors() {
+        // H seviyesi Micro QR'de yoktur.
+        assert_eq!(encode_auto_micro(b"1", EcLevel::H).err(), Some(QrError::InvalidVersion));
+        // M4-L sayısal kapasitesi 35'tir; 36 rakam hiçbir Micro sürüme sığmaz.
+        assert_eq!(encode_auto_micro(&[b'7'; 36], EcLevel::L).err(), Some(QrError::DataTooLong));
+    }
 
     #[test]
     fn test_find_min_version() {
