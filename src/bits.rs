@@ -388,12 +388,26 @@ mod numeric_tests {
     use alloc::vec;
 
     #[test]
-    fn test_iso_18004_2006_example_1() {
+    fn test_iso_18004_2024_numeric_example_1() {
         let mut bits = Bits::new(Version::normal(1).unwrap());
         assert_eq!(bits.push_numeric_data(b"01234567"), Ok(()));
         assert_eq!(
             bits.into_bytes(),
             vec![0b0001_0000, 0b001000_00, 0b00001100, 0b01010110, 0b01_100001, 0b1__0000000]
+        );
+    }
+
+    /// ISO/IEC 18004:2024 Ek I.3.2: "01234567" verisinin M2-L bit akışı —
+    /// 1 bitlik mod göstergesi, 4 bitlik karakter sayısı, 5 bitlik sonlandırıcı
+    /// ve son kod kelimesini dolduran 3 bitlik 0 dolgusu dahil.
+    #[test]
+    fn test_iso_18004_annex_i_micro_bit_stream() {
+        let mut bits = Bits::new(Version::micro(2).unwrap());
+        assert_eq!(bits.push_numeric_data(b"01234567"), Ok(()));
+        assert_eq!(bits.push_terminator(crate::types::EcLevel::L), Ok(()));
+        assert_eq!(
+            bits.into_bytes(),
+            vec![0b0_1000_000, 0b00011_000, 0b10101100, 0b1_1000011, 0b00000_000]
         );
     }
 
@@ -418,7 +432,7 @@ mod numeric_tests {
     }
 
     #[test]
-    fn test_iso_18004_2006_example_2() {
+    fn test_iso_18004_2024_numeric_example_2() {
         let mut bits = Bits::new(Version::micro(3).unwrap());
         assert_eq!(bits.push_numeric_data(b"0123456789012345"), Ok(()));
         assert_eq!(
@@ -519,7 +533,7 @@ mod alphanumeric_tests {
     use alloc::vec;
 
     #[test]
-    fn test_iso_18004_2006_example() {
+    fn test_iso_18004_2024_alphanumeric_example() {
         let mut bits = Bits::new(Version::normal(1).unwrap());
         assert_eq!(bits.push_alphanumeric_data(b"AC-42"), Ok(()));
         assert_eq!(
@@ -1021,6 +1035,120 @@ impl Bits {
     pub fn push_optimal_data(&mut self, data: &[u8]) -> QrResult<()> {
         let segments = Parser::new(data)?.optimize(self.version);
         self.push_segments(data, segments)
+    }
+}
+
+#[cfg(test)]
+mod capacity_boundary_tests {
+    use crate::bits::{Bits, DATA_LENGTHS};
+    use crate::types::{EcLevel, Mode, QrError, Version};
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    /// Verilen sürüm/seviye/mod için standarda göre sığabilecek en fazla
+    /// karakter sayısı: mod göstergesi + karakter sayısı göstergesi + veri
+    /// bitleri toplamı kapasiteyi aşmayana dek sayar.
+    fn max_chars(version: Version, ec_level: EcLevel, mode: Mode) -> usize {
+        let capacity = DATA_LENGTHS[version.table_index()][ec_level as usize];
+        let overhead = version.mode_bits_count() + mode.length_bits_count(version);
+        let mut chars = 0;
+        while overhead + mode.data_bits_count(chars + 1).unwrap() <= capacity {
+            chars += 1;
+        }
+        chars
+    }
+
+    /// `chars` karakterlik tek modlu bir veri parçasını uçtan uca kodlamayı
+    /// dener.
+    fn try_encode(version: Version, ec_level: EcLevel, mode: Mode, chars: usize) -> Result<(), QrError> {
+        let data: Vec<u8> = match mode {
+            Mode::Numeric => vec![b'7'; chars],
+            Mode::Alphanumeric => vec![b'A'; chars],
+            Mode::Byte => vec![0xAB; chars],
+            // 0x889F, Kanji modunun 0x8140-0x9FFC aralığında geçerli bir
+            // Shift JIS karakteridir.
+            Mode::Kanji => [0x88, 0x9F].iter().copied().cycle().take(chars * 2).collect(),
+        };
+        let mut bits = Bits::new(version);
+        match mode {
+            Mode::Numeric => bits.push_numeric_data(&data)?,
+            Mode::Alphanumeric => bits.push_alphanumeric_data(&data)?,
+            Mode::Byte => bits.push_byte_data(&data)?,
+            Mode::Kanji => bits.push_kanji_data(&data)?,
+        }
+        bits.push_terminator(ec_level)
+    }
+
+    /// Sürümün desteklediği modlar: M1 yalnız sayısal, M2 sayısal +
+    /// alfasayısal, M3 ve üzeri dört mod (ISO/IEC 18004:2024 Tablo 2).
+    fn supported_modes(version: Version) -> &'static [Mode] {
+        match (version.is_micro(), version.number()) {
+            (true, 1) => &[Mode::Numeric],
+            (true, 2) => &[Mode::Numeric, Mode::Alphanumeric],
+            _ => &[Mode::Numeric, Mode::Alphanumeric, Mode::Byte, Mode::Kanji],
+        }
+    }
+
+    /// Her sürüm/seviye/mod bileşiminde azami karakter sayısı sığmalı, bir
+    /// fazlası `DataTooLong` vermelidir (ISO/IEC 18004:2024 Tablo 7 sınırları).
+    #[test]
+    fn test_all_capacity_boundaries() {
+        for version in crate::bits::all_versions() {
+            for ec_level in [EcLevel::L, EcLevel::M, EcLevel::Q, EcLevel::H] {
+                if DATA_LENGTHS[version.table_index()][ec_level as usize] == 0 {
+                    continue; // standardın tanımlamadığı bileşim
+                }
+                for &mode in supported_modes(version) {
+                    let limit = max_chars(version, ec_level, mode);
+                    assert_eq!(
+                        try_encode(version, ec_level, mode, limit),
+                        Ok(()),
+                        "{version:?}-{ec_level:?} {mode:?}: {limit} karakter sığmalıydı"
+                    );
+                    assert_eq!(
+                        try_encode(version, ec_level, mode, limit + 1),
+                        Err(QrError::DataTooLong),
+                        "{version:?}-{ec_level:?} {mode:?}: {} karakter sığmamalıydı",
+                        limit + 1
+                    );
+                }
+            }
+        }
+    }
+
+    /// ISO/IEC 18004:2024 Tablo 7'nin karakter kapasitesi sütunlarından
+    /// (sayfa görüntüsünden okunan) noktasal değerler: (sürüm, seviye,
+    /// [sayısal, alfasayısal, bayt, Kanji]).
+    #[test]
+    fn test_table_7_spot_values() {
+        let micro = |n| Version::micro(n).unwrap();
+        let normal = |n| Version::normal(n).unwrap();
+        #[rustfmt::skip]
+        let expected: &[(Version, EcLevel, &[(Mode, usize)])] = &[
+            (micro(1), EcLevel::L, &[(Mode::Numeric, 5)]),
+            (micro(2), EcLevel::L, &[(Mode::Numeric, 10), (Mode::Alphanumeric, 6)]),
+            (micro(2), EcLevel::M, &[(Mode::Numeric, 8), (Mode::Alphanumeric, 5)]),
+            (micro(3), EcLevel::L, &[(Mode::Numeric, 23), (Mode::Alphanumeric, 14), (Mode::Byte, 9), (Mode::Kanji, 6)]),
+            (micro(3), EcLevel::M, &[(Mode::Numeric, 18), (Mode::Alphanumeric, 11), (Mode::Byte, 7), (Mode::Kanji, 4)]),
+            (micro(4), EcLevel::L, &[(Mode::Numeric, 35), (Mode::Alphanumeric, 21), (Mode::Byte, 15), (Mode::Kanji, 9)]),
+            (micro(4), EcLevel::M, &[(Mode::Numeric, 30), (Mode::Alphanumeric, 18), (Mode::Byte, 13), (Mode::Kanji, 8)]),
+            (micro(4), EcLevel::Q, &[(Mode::Numeric, 21), (Mode::Alphanumeric, 13), (Mode::Byte, 9), (Mode::Kanji, 5)]),
+            (normal(1), EcLevel::L, &[(Mode::Numeric, 41), (Mode::Alphanumeric, 25), (Mode::Byte, 17), (Mode::Kanji, 10)]),
+            (normal(1), EcLevel::M, &[(Mode::Numeric, 34), (Mode::Alphanumeric, 20), (Mode::Byte, 14), (Mode::Kanji, 8)]),
+            (normal(1), EcLevel::Q, &[(Mode::Numeric, 27), (Mode::Alphanumeric, 16), (Mode::Byte, 11), (Mode::Kanji, 7)]),
+            (normal(1), EcLevel::H, &[(Mode::Numeric, 17), (Mode::Alphanumeric, 10), (Mode::Byte, 7), (Mode::Kanji, 4)]),
+            (normal(2), EcLevel::L, &[(Mode::Numeric, 77), (Mode::Alphanumeric, 47), (Mode::Byte, 32), (Mode::Kanji, 20)]),
+            (normal(40), EcLevel::L, &[(Mode::Numeric, 7089)]),
+        ];
+        for &(version, ec_level, entries) in expected {
+            for &(mode, chars) in entries {
+                assert_eq!(
+                    max_chars(version, ec_level, mode),
+                    chars,
+                    "{version:?}-{ec_level:?} {mode:?} kapasitesi Tablo 7 ile uyuşmuyor"
+                );
+            }
+        }
     }
 }
 

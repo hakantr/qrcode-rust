@@ -207,6 +207,26 @@ mod construct_codewords_test {
         assert_eq!(&*blocks_vec, &expected_blocks[..]);
         assert_eq!(&*ec_vec, &expected_ec[..]);
     }
+
+    /// ISO/IEC 18004:2024 Ek I.2.3: "01234567" verisinin 1-M sembolü için
+    /// standardın verdiği 10 hata düzeltme kod kelimesi.
+    #[test]
+    fn test_annex_i_qr_example() {
+        let msg = b"\x10\x20\x0c\x56\x61\x80\xec\x11\xec\x11\xec\x11\xec\x11\xec\x11";
+        let (blocks_vec, ec_vec) = construct_codewords(msg, Version::normal(1).unwrap(), EcLevel::M).unwrap();
+        assert_eq!(&*blocks_vec, &msg[..]);
+        assert_eq!(&*ec_vec, b"\xa5\x24\xd4\xc1\xed\x36\xc7\x87\x2c\x55");
+    }
+
+    /// ISO/IEC 18004:2024 Ek I.3.3: aynı verinin M2-L sembolü için standardın
+    /// verdiği 5 hata düzeltme kod kelimesi.
+    #[test]
+    fn test_annex_i_micro_example() {
+        let msg = b"\x40\x18\xac\xc3\x00";
+        let (blocks_vec, ec_vec) = construct_codewords(msg, Version::micro(2).unwrap(), EcLevel::L).unwrap();
+        assert_eq!(&*blocks_vec, &msg[..]);
+        assert_eq!(&*ec_vec, b"\x86\x0d\x22\xae\x30");
+    }
 }
 
 //}}}

@@ -1832,8 +1832,18 @@ impl Canvas {
 
 #[cfg(test)]
 mod mask_tests {
-    use crate::canvas::{Canvas, MaskPattern};
+    use crate::canvas::{Canvas, FORMAT_INFOS_MICRO_QR, FORMAT_INFOS_QR, MaskPattern};
     use crate::types::{EcLevel, Version};
+
+    /// ISO/IEC 18004:2024 Ek I: "01234567" örneklerinde sembole yerleştirilen
+    /// biçim bilgisi bit dizileri. 1-M + maske 010 (I.2.5'e göre; I.2.6'daki
+    /// "011" ifadesi standardın kendi yazım hatasıdır, hesap 010 ile ilerler)
+    /// ve M2-L (sembol numarası 001) + maske 01.
+    #[test]
+    fn test_annex_i_format_infos() {
+        assert_eq!(FORMAT_INFOS_QR[0b00_010], 0b101111001111100);
+        assert_eq!(FORMAT_INFOS_MICRO_QR[0b001_01], 0b101000010011001);
+    }
 
     #[test]
     fn test_apply_mask_qr() {
