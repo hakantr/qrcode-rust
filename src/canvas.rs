@@ -2052,8 +2052,11 @@ impl Canvas {
     /// Dengesiz koyu/açık oranının ceza puanını hesaplar.
     ///
     /// ISO/IEC 18004:2024 §7.8.3 (2015: §7.8.3.1): koyu modül oranının %50'den
-    /// sapması %5'lik basamaklara bölünür ve her tam basamak N4 = 10 puan
-    /// ekler; %45 ile %55 arası 0 puandır. Mümkün olan en yüksek puan 100'dür.
+    /// sapmasının her tamamlanmış %5'lik basamağı N4 = 10 puan ekler; %5'ten
+    /// küçük sapma 0 puandır. Mümkün olan en yüksek puan 100'dür. (Tablo 11'in
+    /// bantları uç noktalarını paylaştığından tam basamak sınırında standart
+    /// muğlaktır; burada yüksek bant seçilir ve %45/%55 gibi sınırlar tek
+    /// modül sayılı sembollerde zaten tam olarak oluşamaz.)
     fn compute_balance_penalty_score(&self) -> u32 {
         let dark_modules = self.modules.iter().filter(|m| m.is_dark()).count();
         let total_modules = self.modules.len();

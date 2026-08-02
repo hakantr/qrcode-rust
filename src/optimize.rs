@@ -348,47 +348,72 @@ impl Optimizer {
 /// parçanın uzunluğu tekdüze arttığından, tek başına `best[i]`'yi aşan aday
 /// bulunduğunda arama erkenden kesilir.
 fn optimize_chain(runs: &[Segment], version: Version, out: &mut Vec<Segment>) {
-    if runs.is_empty() {
-        return;
-    }
-    if runs.len() == 1 {
-        out.push(runs[0]);
+    if runs.len() <= 1 {
+        out.extend_from_slice(runs);
         return;
     }
 
-    let mut best = alloc::vec![usize::MAX; runs.len() + 1];
-    let mut cut = alloc::vec![0_usize; runs.len() + 1];
-    best[0] = 0;
-    for i in 1..=runs.len() {
-        let mut mode = runs[i - 1].mode;
-        for j in (0..i).rev() {
-            mode = mode.max(runs[j].mode);
-            let candidate = Segment { mode, begin: runs[j].begin, end: runs[i - 1].end };
+    // `best` ve `cut` yalnızca bu döngüde, çalışma başına birer giriş itilerek
+    // büyür; `i` girişleri ilk `i` çalışmayı kapsar.
+    let mut best: Vec<usize> = Vec::with_capacity(runs.len() + 1);
+    let mut cut: Vec<usize> = Vec::with_capacity(runs.len() + 1);
+    best.push(0);
+    cut.push(0);
+    for last_run in runs {
+        let mut mode = last_run.mode;
+        let mut best_total = usize::MAX;
+        let mut best_begin = 0;
+        // Aday son parça, `begin` çalışmasından `last_run`'a kadar uzanır;
+        // `zip` eşlemesi `begin`'i o âna dek hesaplanmış `best` girişleriyle
+        // sınırlar ve `begin` sondan başa yürür. Aday uzunluğu `begin`
+        // küçüldükçe tekdüze arttığından, tek başına eldeki en iyi toplamı
+        // aşan aday görüldüğünde arama kesilir.
+        for (begin, (run, &prefix_total)) in runs.iter().zip(&best).enumerate().rev() {
+            mode = mode.max(run.mode);
+            let candidate = Segment { mode, begin: run.begin, end: last_run.end };
             let candidate_len = candidate.encoded_len(version);
-            if best[i] <= candidate_len {
-                break; // daha uzun adaylar yalnızca daha pahalı olabilir
+            if best_total <= candidate_len {
+                break;
             }
-            if let Some(total) = best[j].checked_add(candidate_len)
-                && total < best[i]
+            if let Some(total) = prefix_total.checked_add(candidate_len)
+                && total < best_total
             {
-                best[i] = total;
-                cut[i] = j;
+                best_total = total;
+                best_begin = begin;
             }
+        }
+        best.push(best_total);
+        cut.push(best_begin);
+    }
+
+    // Bölüm sınırlarını geriden öne çıkar.
+    let mut bounds = Vec::new();
+    let mut index = runs.len();
+    while index > 0 {
+        bounds.push(index);
+        #[expect(
+            clippy::expect_used,
+            reason = "cut, çalışma başına bir giriş itilerek kuruldu; index her zaman tablo içinde kalır"
+        )]
+        {
+            index = *cut.get(index).expect("Optimizer iç değişmezi: kesim indeksi tablonun içinde kalmalı");
         }
     }
 
-    // Bölümleri geriden öne çıkarıp sırayla yaz.
-    let mut boundaries = Vec::new();
-    let mut index = runs.len();
-    while index > 0 {
-        boundaries.push(index);
-        index = cut[index];
-    }
-    let mut begin_run = 0;
-    for &end_run in boundaries.iter().rev() {
-        let mode = runs[begin_run..end_run].iter().fold(runs[begin_run].mode, |mode, run| mode.max(run.mode));
-        out.push(Segment { mode, begin: runs[begin_run].begin, end: runs[end_run - 1].end });
-        begin_run = end_run;
+    // Çalışmaları soldan sağa biriktirip her bölüm sınırında tek parça yaz.
+    let mut ends = bounds.iter().rev().copied().peekable();
+    let mut accumulated: Option<Segment> = None;
+    for (index, run) in runs.iter().enumerate() {
+        accumulated = Some(match accumulated.take() {
+            None => *run,
+            Some(seg) => Segment { mode: seg.mode.max(run.mode), begin: seg.begin, end: run.end },
+        });
+        if ends.peek() == Some(&(index + 1))
+            && let Some(seg) = accumulated.take()
+        {
+            out.push(seg);
+            ends.next();
+        }
     }
 }
 
