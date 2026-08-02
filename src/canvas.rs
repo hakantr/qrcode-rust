@@ -2015,6 +2015,12 @@ impl Canvas {
                     continue;
                 }
 
+                // Sembol dışında kalan koordinatlar açık sayılır: ISO/IEC
+                // 18004:2024 §7.8.3 değerlendirme alanını "sembolün tamamı"
+                // olarak tanımlayıp kenar durumunu açıkta bırakır; sessiz bölge
+                // ise tanım gereği açıktır (§5.3.8), dolayısıyla kenara dayalı
+                // bulucu benzeri desenler tarayıcının gerçekte göreceği şekliyle
+                // cezalandırılır.
                 let check = |k| 0 <= k && k < self.width && get(k) != Color::Light;
                 if !((j - 4)..j).any(&check) || !((j + 7)..(j + 11)).any(&check) {
                     total_score += 40;
