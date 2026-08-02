@@ -569,9 +569,7 @@ mod optimize_tests {
     #[test]
     fn test_annex_j_micro_capacity_example() {
         use crate::optimize::Parser;
-        for (version, expected_bits) in
-            [(Version::micro(3).unwrap(), 77), (Version::micro(4).unwrap(), 81)]
-        {
+        for (version, expected_bits) in [(Version::micro(3).unwrap(), 77), (Version::micro(4).unwrap(), 81)] {
             let segments = Parser::new(b"123456ABCDEFGH").unwrap().optimize(version).collect::<Vec<_>>();
             assert_eq!(total_encoded_len(&segments, version), Ok(expected_bits));
         }

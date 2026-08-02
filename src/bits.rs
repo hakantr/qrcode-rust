@@ -464,10 +464,7 @@ mod numeric_tests {
         let mut bits = Bits::new(Version::micro(2).unwrap());
         assert_eq!(bits.push_numeric_data(b"01234567"), Ok(()));
         assert_eq!(bits.push_terminator(crate::types::EcLevel::L), Ok(()));
-        assert_eq!(
-            bits.into_bytes(),
-            vec![0b0_1000_000, 0b00011_000, 0b10101100, 0b1_1000011, 0b00000_000]
-        );
+        assert_eq!(bits.into_bytes(), vec![0b0_1000_000, 0b00011_000, 0b10101100, 0b1_1000011, 0b00000_000]);
     }
 
     #[test]
