@@ -574,6 +574,62 @@ mod optimize_tests {
             assert_eq!(total_encoded_len(&segments, version), Ok(expected_bits));
         }
     }
+
+    /// Optimizer'ın dinamik programlaması, çalışma sınırları üzerindeki tüm
+    /// 2^(n-1) bölümlemeyi tarayan kaba kuvvetin bulduğu optimumla her durumda
+    /// aynı toplam uzunluğu vermelidir.
+    #[test]
+    fn test_dp_matches_brute_force() {
+        let modes = [Mode::Numeric, Mode::Alphanumeric, Mode::Byte, Mode::Kanji];
+        let versions = [
+            Version::normal(1).unwrap(),
+            Version::normal(10).unwrap(),
+            Version::normal(40).unwrap(),
+            Version::micro(3).unwrap(),
+            Version::micro(4).unwrap(),
+        ];
+        // Deterministik LCG; testin tekrarlanabilir olması için sabit tohum.
+        let mut seed = 0x2024_u32;
+        let mut next = move |bound: usize| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            usize::try_from(seed >> 16).unwrap() % bound
+        };
+
+        for case in 0..300 {
+            let run_count = next(6) + 1;
+            let mut runs = Vec::new();
+            let mut begin = 0_usize;
+            for _ in 0..run_count {
+                let mode = modes[next(modes.len())];
+                let mut len = next(13) + 1;
+                if mode == Mode::Kanji {
+                    len = len.div_ceil(2) * 2; // Kanji çalışmaları çift bayt olmalı
+                }
+                runs.push(Segment { mode, begin, end: begin + len });
+                begin += len;
+            }
+            let version = versions[next(versions.len())];
+
+            let mut brute_force_best = usize::MAX;
+            for cut_mask in 0_u32..(1 << (run_count - 1)) {
+                let mut total = 0_usize;
+                let mut start = 0_usize;
+                for i in 0..run_count {
+                    if i + 1 == run_count || cut_mask & (1 << i) != 0 {
+                        let mode = runs[start..=i].iter().fold(runs[start].mode, |m, r| m.max(r.mode));
+                        let seg = Segment { mode, begin: runs[start].begin, end: runs[i].end };
+                        total += seg.encoded_len(version);
+                        start = i + 1;
+                    }
+                }
+                brute_force_best = brute_force_best.min(total);
+            }
+
+            let opt_segs = Optimizer::new(runs.iter().copied(), version).collect::<Vec<_>>();
+            let dp_total = total_encoded_len(&opt_segs, version).unwrap();
+            assert_eq!(dp_total, brute_force_best, "durum {case}: {runs:?} @ {version:?}");
+        }
+    }
 }
 
 //}}}
