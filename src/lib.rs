@@ -69,6 +69,7 @@ pub struct QrCode {
     version: Version,
     ec_level: EcLevel,
     width: usize,
+    symbology_identifier: &'static str,
 }
 
 impl QrCode {
@@ -164,13 +165,30 @@ impl QrCode {
     /// düzeltme seviyesi uyumsuzsa, hata döndürür.
     pub fn with_bits(bits: bits::Bits, ec_level: EcLevel) -> QrResult<Self> {
         let version = bits.version();
+        // ISO/IEC 18004:2024 Ek F, Tablo F.1: m, ECI kullanımına ve FNC1
+        // konumuna göre belirlenir; Micro QR'de ECI/FNC1 bulunamadığından m
+        // kendiliğinden standardın şart koştuğu 1 değerinde kalır.
+        let symbology_identifier = match (bits.fnc1_first_used(), bits.fnc1_second_used(), bits.eci_used()) {
+            (true, _, false) => "]Q3",
+            (true, _, true) => "]Q4",
+            (_, true, false) => "]Q5",
+            (_, true, true) => "]Q6",
+            (_, _, false) => "]Q1",
+            (_, _, true) => "]Q2",
+        };
         let data = bits.into_bytes();
         let (encoded_data, ec_data) = ec::construct_codewords(&data, version, ec_level)?;
         let mut canvas = canvas::Canvas::new(version, ec_level);
         canvas.draw_all_functional_patterns();
         canvas.draw_data(&encoded_data, &ec_data)?;
         let canvas = canvas.apply_best_mask()?;
-        Ok(Self { content: canvas.into_colors(), version, ec_level, width: version.width().as_usize() })
+        Ok(Self {
+            content: canvas.into_colors(),
+            version,
+            ec_level,
+            width: version.width().as_usize(),
+            symbology_identifier,
+        })
     }
 
     /// Bu QR kodunun sürümünü verir.
@@ -181,6 +199,24 @@ impl QrCode {
     /// Bu QR kodunun hata düzeltme seviyesini verir.
     pub const fn error_correction_level(&self) -> EcLevel {
         self.ec_level
+    }
+
+    /// ISO/IEC 18004:2024 Ek F'ye göre bu sembolün sembol tanımlayıcısını
+    /// verir; uyumlu bir kod çözücünün çözülen verinin önüne ekleyeceği
+    /// `"]Qm"` biçimindeki üç karakterdir.
+    ///
+    /// `m` değeri içeriğe göre belirlenir: ECI'siz düz veri için 1, ECI
+    /// kullanıldıysa 2, birinci konumda FNC1 için 3/4, ikinci konumda FNC1
+    /// için 5/6. Micro QR kodlarında değer her zaman 1'dir.
+    ///
+    /// ```
+    /// use qrcode::QrCode;
+    ///
+    /// let code = QrCode::new(b"01234567").unwrap();
+    /// assert_eq!(code.symbology_identifier(), "]Q1");
+    /// ```
+    pub const fn symbology_identifier(&self) -> &'static str {
+        self.symbology_identifier
     }
 
     /// Kenar başına modül sayısını, yani bu QR kodunun genişliğini verir.
@@ -322,6 +358,28 @@ impl Index<(usize, usize)> for QrCode {
 #[cfg(test)]
 mod tests {
     use crate::{EcLevel, QrCode, Version};
+
+    /// ISO/IEC 18004:2024 Ek F, Tablo F.1: m değeri ECI ve FNC1 kullanımına
+    /// göre belirlenir; Micro QR'de her zaman 1'dir.
+    #[test]
+    fn test_symbology_identifier() {
+        assert_eq!(QrCode::new(b"01234567").unwrap().symbology_identifier(), "]Q1");
+
+        let micro = QrCode::with_version(b"123", Version::micro(1).unwrap(), EcLevel::L).unwrap();
+        assert_eq!(micro.symbology_identifier(), "]Q1");
+
+        let mut bits = crate::bits::Bits::new(Version::normal(1).unwrap());
+        bits.push_eci_designator(9).unwrap();
+        bits.push_byte_data(b"\xa1\xa2").unwrap();
+        bits.push_terminator(EcLevel::L).unwrap();
+        assert_eq!(QrCode::with_bits(bits, EcLevel::L).unwrap().symbology_identifier(), "]Q2");
+
+        let mut bits = crate::bits::Bits::new(Version::normal(1).unwrap());
+        bits.push_fnc1_first_position().unwrap();
+        bits.push_numeric_data(b"0104912345123459").unwrap();
+        bits.push_terminator(EcLevel::L).unwrap();
+        assert_eq!(QrCode::with_bits(bits, EcLevel::L).unwrap().symbology_identifier(), "]Q3");
+    }
 
     #[test]
     fn test_annex_i_qr() {
