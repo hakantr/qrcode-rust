@@ -838,6 +838,123 @@ impl Bits {
     }
 }
 
+//}}}
+//------------------------------------------------------------------------------
+//{{{ Structured Append
+
+/// Bir Structured Append mesajının parite baytını hesaplar.
+///
+/// ISO/IEC 18004:2024 §8.3: parite, mesajın sembollere bölünmeden *önceki*
+/// özgün giriş verisinin tamamının bayt bayt XOR'udur. Kanji karakterleri iki
+/// baytlık Shift JIS değerleriyle temsil edilir; `data` zaten bayt dizisi
+/// olduğundan bu doğal olarak sağlanır. Mod göstergeleri, karakter sayısı
+/// göstergeleri, dolgu ve sonlandırıcı hesaba katılmaz.
+///
+/// ```
+/// use qrcode::bits::structured_append_parity;
+///
+/// // Standardın örneği: "0123456789日本" (Kanji kısmı Shift JIS 93FA 967B).
+/// let message = b"0123456789\x93\xfa\x96\x7b";
+/// assert_eq!(structured_append_parity(message), 0x85);
+/// ```
+pub fn structured_append_parity(data: &[u8]) -> u8 {
+    data.iter().fold(0, |parity, byte| parity ^ byte)
+}
+
+impl Bits {
+    /// Bit akışının başına bir Structured Append başlığı ekler.
+    ///
+    /// ISO/IEC 18004:2024 §8'e göre bir mesaj en fazla 16 QR kodu sembolüne
+    /// bölünebilir; her sembol, 0011 mod göstergesi + sembol sırası göstergesi
+    /// (4 bit konum − 1, 4 bit toplam − 1) + parite baytından oluşan 20 bitlik
+    /// bu başlıkla açılır. `position` 1 tabanlıdır. `parity` tüm sembollerde
+    /// aynı olmalı ve [`structured_append_parity`] ile mesajın tamamından
+    /// hesaplanmalıdır.
+    ///
+    /// ```
+    /// use qrcode::bits::{Bits, structured_append_parity};
+    /// use qrcode::types::{EcLevel, Version};
+    ///
+    /// let message = b"0123456789";
+    /// let parity = structured_append_parity(message);
+    /// let mut first = Bits::new(Version::normal(1).unwrap());
+    /// first.push_structured_append_header(1, 2, parity).unwrap();
+    /// first.push_numeric_data(&message[..5]).unwrap();
+    /// first.push_terminator(EcLevel::L).unwrap();
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Başlık akışın en başında değilse ya da `position`/`total` aralık
+    /// dışındaysa `Err(QrError::InvalidSegment)`; sürüm bir Micro QR koduysa
+    /// (§8.1 Structured Append'i Micro'da yasaklar)
+    /// `Err(QrError::UnsupportedCharacterSet)` döndürür.
+    pub fn push_structured_append_header(&mut self, position: u8, total: u8, parity: u8) -> QrResult<()> {
+        if !(2..=16).contains(&total) || !(1..=total).contains(&position) {
+            return Err(QrError::InvalidSegment);
+        }
+        self.push_mode_indicator(ExtendedMode::StructuredAppend)?;
+        self.push_number(4, u16::from(position - 1));
+        self.push_number(4, u16::from(total - 1));
+        self.push_number(8, u16::from(parity));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod structured_append_tests {
+    use crate::bits::{Bits, structured_append_parity};
+    use crate::types::{QrError, Version};
+    use alloc::vec;
+
+    /// ISO/IEC 18004:2024 §8.3'ün örneği: "0123456789日本" verisinin paritesi.
+    #[test]
+    fn test_parity_example() {
+        assert_eq!(structured_append_parity(b"0123456789\x93\xfa\x96\x7b"), 0x85);
+        assert_eq!(structured_append_parity(b""), 0);
+    }
+
+    /// §8.2'nin örneği: yedi sembollük dizinin üçüncüsü 0010 0110 kodlanır.
+    #[test]
+    fn test_header_layout() {
+        let mut bits = Bits::new(Version::normal(1).unwrap());
+        assert_eq!(bits.push_structured_append_header(3, 7, 0x85), Ok(()));
+        assert_eq!(bits.into_bytes(), vec![0b0011_0010, 0b0110_1000, 0b0101_0000]);
+    }
+
+    #[test]
+    fn test_invalid_usage() {
+        let mut bits = Bits::new(Version::normal(1).unwrap());
+        assert_eq!(bits.push_structured_append_header(1, 1, 0), Err(QrError::InvalidSegment));
+        assert_eq!(bits.push_structured_append_header(0, 2, 0), Err(QrError::InvalidSegment));
+        assert_eq!(bits.push_structured_append_header(3, 2, 0), Err(QrError::InvalidSegment));
+        assert_eq!(bits.push_structured_append_header(1, 17, 0), Err(QrError::InvalidSegment));
+
+        // Başlık akışın en başında olmalıdır (§8.1).
+        assert_eq!(bits.push_numeric_data(b"123"), Ok(()));
+        assert_eq!(bits.push_structured_append_header(1, 2, 0), Err(QrError::InvalidSegment));
+
+        // Micro QR sembollerinde Structured Append yoktur (§8.1).
+        let mut micro = Bits::new(Version::micro(4).unwrap());
+        assert_eq!(micro.push_structured_append_header(1, 2, 0), Err(QrError::UnsupportedCharacterSet));
+    }
+
+    /// §8.1: varsayılan olmayan ECI'ler ve §7.4.9 gereği FNC1, Structured
+    /// Append başlığını izleyebilir.
+    #[test]
+    fn test_header_then_eci_and_fnc1() {
+        let mut bits = Bits::new(Version::normal(2).unwrap());
+        assert_eq!(bits.push_structured_append_header(1, 2, 0x42), Ok(()));
+        assert_eq!(bits.push_eci_designator(9), Ok(()));
+        assert_eq!(bits.push_byte_data(b"\xa1\xa2"), Ok(()));
+
+        let mut bits = Bits::new(Version::normal(2).unwrap());
+        assert_eq!(bits.push_structured_append_header(2, 2, 0x42), Ok(()));
+        assert_eq!(bits.push_fnc1_first_position(), Ok(()));
+        assert_eq!(bits.push_numeric_data(b"123"), Ok(()));
+    }
+}
+
 #[cfg(test)]
 mod segment_order_tests {
     use crate::bits::Bits;
